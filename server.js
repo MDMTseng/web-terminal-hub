@@ -30,6 +30,62 @@ function saveGroups() {
   console.log(`[groups] Saved ${groupsConfig.length} groups to groups.json`);
 }
 
+// ========== Master Password Config ==========
+const AUTH_FILE = path.join(__dirname, 'auth.json');
+let authConfig = { passwordHash: null, masterTokens: [] };
+
+function loadAuthConfig() {
+  try {
+    const raw = fs.readFileSync(AUTH_FILE, 'utf-8');
+    authConfig = JSON.parse(raw);
+    if (!authConfig.masterTokens) authConfig.masterTokens = [];
+    console.log(`[auth] Master password configured: ${authConfig.passwordHash ? 'YES' : 'NO'}`);
+  } catch (err) {
+    console.log('[auth] No auth.json found — master password not set.');
+    authConfig = { passwordHash: null, masterTokens: [] };
+  }
+}
+
+function saveAuthConfig() {
+  fs.writeFileSync(AUTH_FILE, JSON.stringify(authConfig, null, 2), 'utf-8');
+}
+
+loadAuthConfig();
+
+// ========== Password hashing utilities (crypto.scrypt, zero deps) ==========
+const { scrypt, randomBytes, createHash, timingSafeEqual } = crypto;
+
+function hashPassword(password) {
+  return new Promise((resolve, reject) => {
+    const salt = randomBytes(16).toString('hex');
+    scrypt(password, salt, 64, { N: 16384, r: 8, p: 1 }, (err, derivedKey) => {
+      if (err) return reject(err);
+      resolve(`scrypt:${salt}:${derivedKey.toString('hex')}`);
+    });
+  });
+}
+
+function verifyPassword(password, storedHash) {
+  return new Promise((resolve, reject) => {
+    const [, salt, keyHex] = storedHash.split(':');
+    const keyBuffer = Buffer.from(keyHex, 'hex');
+    scrypt(password, salt, 64, { N: 16384, r: 8, p: 1 }, (err, derivedKey) => {
+      if (err) return reject(err);
+      resolve(timingSafeEqual(keyBuffer, derivedKey));
+    });
+  });
+}
+
+function hashMasterToken(token) {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function isValidMasterToken(token) {
+  if (!token) return false;
+  const tokenH = hashMasterToken(token);
+  return authConfig.masterTokens.some(t => t.tokenHash === tokenH);
+}
+
 // ========== Auth: per-group latest-login-wins ==========
 // Each group has its own active token. Logging into "Dev" only kicks previous "Dev" session.
 const groupTokens = new Map(); // groupName -> { token, created }
@@ -93,14 +149,145 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// ========== Welcome page (replaces login) ==========
+// ========== Master Auth Middleware ==========
+function masterAuthMiddleware(req, res, next) {
+  // Always allow: login page, master auth APIs, static assets
+  if (req.path === '/login' || req.path === '/login.html' ||
+      req.path === '/api/master-status' || req.path === '/api/master-login' ||
+      req.path === '/api/master-setup' || req.path === '/style.css') {
+    return next();
+  }
+
+  // If no master password is configured, redirect to login for setup
+  if (!authConfig.passwordHash) {
+    if (req.path.startsWith('/api/')) {
+      return res.status(401).json({ error: 'Master password not set. Visit /login to set up.' });
+    }
+    return res.redirect('/login');
+  }
+
+  // Check for master_token cookie
+  const masterToken = req.cookies?.master_token;
+  if (isValidMasterToken(masterToken)) {
+    return next();
+  }
+
+  // Not authenticated with master password
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: 'Master password required.' });
+  }
+  return res.redirect('/login');
+}
+
+app.use(masterAuthMiddleware);
+
+// ========== Master Password API ==========
+app.get('/api/master-status', (req, res) => {
+  res.json({ hasPassword: !!authConfig.passwordHash });
+});
+
+app.post('/api/master-setup', async (req, res) => {
+  // Only works if no password is set yet
+  if (authConfig.passwordHash) {
+    return res.status(403).json({ error: 'Password already set.' });
+  }
+
+  const { password } = req.body;
+  if (!password || password.length < 4) {
+    return res.status(400).json({ error: 'Password must be at least 4 characters.' });
+  }
+
+  authConfig.passwordHash = await hashPassword(password);
+  authConfig.masterTokens = [];
+
+  // Auto-login: generate and set token
+  const rawToken = randomBytes(32).toString('hex');
+  authConfig.masterTokens.push({
+    tokenHash: hashMasterToken(rawToken),
+    created: new Date().toISOString(),
+    label: 'initial-setup'
+  });
+  saveAuthConfig();
+
+  console.log('[auth] Master password set for the first time.');
+
+  res.cookie('master_token', rawToken, {
+    httpOnly: true,
+    sameSite: 'Strict',
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    path: '/'
+  });
+
+  res.json({ ok: true });
+});
+
+app.post('/api/master-login', async (req, res) => {
+  if (!authConfig.passwordHash) {
+    return res.status(400).json({ error: 'No password configured. Use setup.' });
+  }
+
+  const { password, remember } = req.body;
+  if (!password) {
+    return res.status(400).json({ error: 'Password required.' });
+  }
+
+  const valid = await verifyPassword(password, authConfig.passwordHash);
+  if (!valid) {
+    console.log('[auth] Master login failed: wrong password');
+    return res.status(401).json({ error: 'Wrong password.' });
+  }
+
+  // Generate master token
+  const rawToken = randomBytes(32).toString('hex');
+  authConfig.masterTokens.push({
+    tokenHash: hashMasterToken(rawToken),
+    created: new Date().toISOString(),
+    label: 'login'
+  });
+
+  // Prune old tokens (keep max 10)
+  if (authConfig.masterTokens.length > 10) {
+    authConfig.masterTokens = authConfig.masterTokens.slice(-10);
+  }
+  saveAuthConfig();
+
+  const maxAge = remember
+    ? 90 * 24 * 60 * 60 * 1000   // 90 days if "remember me"
+    : 24 * 60 * 60 * 1000;        // 24 hours otherwise
+
+  res.cookie('master_token', rawToken, {
+    httpOnly: true,
+    sameSite: 'Strict',
+    maxAge,
+    path: '/'
+  });
+
+  console.log(`[auth] Master login successful (remember: ${!!remember})`);
+  res.json({ ok: true });
+});
+
+app.post('/api/master-logout', (req, res) => {
+  const masterToken = req.cookies?.master_token;
+  if (masterToken) {
+    const tokenH = hashMasterToken(masterToken);
+    authConfig.masterTokens = authConfig.masterTokens.filter(t => t.tokenHash !== tokenH);
+    saveAuthConfig();
+  }
+  res.clearCookie('master_token');
+  res.clearCookie('token');
+  res.clearCookie('group');
+  console.log('[auth] Master logout');
+  res.json({ ok: true });
+});
+
+// ========== Welcome page ==========
 app.get('/welcome', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'welcome.html'));
 });
 
-// Redirect old /login to /welcome
+// Login page (master password)
 app.get('/login', (req, res) => {
-  res.redirect('/welcome');
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
 // ========== Groups API ==========
@@ -522,9 +709,25 @@ app.delete('/api/terminal/:id', (req, res) => {
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ noServer: true });
 
-// WebSocket upgrade — validate token + group isolation
+// WebSocket upgrade — validate master token + group token + group isolation
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+
+  // Validate master auth first (parse cookies from raw header)
+  if (authConfig.passwordHash) {
+    const cookieHeader = req.headers.cookie || '';
+    const cookies = {};
+    cookieHeader.split(';').forEach(c => {
+      const [key, ...val] = c.trim().split('=');
+      if (key) cookies[key.trim()] = val.join('=').trim();
+    });
+    if (!isValidMasterToken(cookies.master_token)) {
+      console.log(`[ws] Rejected: invalid master token`);
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+  }
 
   const token = url.searchParams.get('token');
   const group = getGroupForToken(token);
@@ -621,7 +824,7 @@ server.listen(PORT, () => {
   console.log(`\n========================================`);
   console.log(`  Web Terminal Hub running on port ${PORT}`);
   console.log(`  Groups: ${groupsConfig.map(g => g.name).join(', ')}`);
-  console.log(`  No password - click to enter any group`);
+  console.log(`  Master password: ${authConfig.passwordHash ? 'ENABLED' : 'NOT SET (visit /login to set up)'}`);
   console.log(`  http://localhost:${PORT}`);
   console.log(`========================================\n`);
 });

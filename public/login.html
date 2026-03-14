@@ -11,7 +11,7 @@
     <div class="login-screen">
       <div class="login-box">
         <h1>Terminal Hub</h1>
-        <p class="login-subtitle">Enter password to access</p>
+        <p class="login-subtitle" id="login-subtitle">Enter password to access</p>
         <form id="login-form">
           <input
             type="password"
@@ -20,34 +20,68 @@
             autocomplete="current-password"
             autofocus
           >
+          <label class="remember-label" id="remember-label">
+            <input type="checkbox" id="remember-me" checked>
+            <span>Remember this device</span>
+          </label>
           <button type="submit" id="login-btn">Login</button>
         </form>
         <p id="login-error" class="login-error hidden"></p>
-        <p class="login-note">Only the latest login session has access.<br>Previous sessions will be disconnected.</p>
+        <p class="login-note" id="login-note">Enter the master password to access Terminal Hub.</p>
       </div>
     </div>
   </div>
   <script>
+    let isSetupMode = false;
+
+    async function checkSetup() {
+      try {
+        const resp = await fetch('/api/master-status');
+        const data = await resp.json();
+        if (!data.hasPassword) {
+          isSetupMode = true;
+          document.getElementById('login-subtitle').textContent = 'Create a master password';
+          document.getElementById('login-btn').textContent = 'Set Password';
+          document.getElementById('password-input').placeholder = 'Choose a password (min 4 chars)';
+          document.getElementById('password-input').autocomplete = 'new-password';
+          document.getElementById('remember-label').style.display = 'none';
+          document.getElementById('login-note').textContent = 'This password protects access to all terminal workspaces.';
+        }
+      } catch (err) {
+        console.error('Failed to check setup status:', err);
+      }
+    }
+
+    checkSetup();
+
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const password = document.getElementById('password-input').value;
+      const remember = document.getElementById('remember-me').checked;
       const errorEl = document.getElementById('login-error');
       const btn = document.getElementById('login-btn');
 
+      if (!password) {
+        errorEl.textContent = 'Please enter a password';
+        errorEl.classList.remove('hidden');
+        return;
+      }
+
       btn.disabled = true;
-      btn.textContent = 'Logging in...';
+      btn.textContent = isSetupMode ? 'Setting up...' : 'Logging in...';
       errorEl.classList.add('hidden');
 
       try {
-        const resp = await fetch('/api/login', {
+        const endpoint = isSetupMode ? '/api/master-setup' : '/api/master-login';
+        const resp = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password })
+          body: JSON.stringify({ password, remember })
         });
         const data = await resp.json();
 
         if (data.ok) {
-          window.location.href = '/';
+          window.location.href = '/welcome';
         } else {
           errorEl.textContent = data.error || 'Login failed';
           errorEl.classList.remove('hidden');
@@ -58,7 +92,7 @@
       }
 
       btn.disabled = false;
-      btn.textContent = 'Login';
+      btn.textContent = isSetupMode ? 'Set Password' : 'Login';
     });
   </script>
 </body>

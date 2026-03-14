@@ -12,7 +12,10 @@
       <div class="welcome-header">
         <h1>Terminal Hub</h1>
         <p class="welcome-subtitle">Choose a workspace to start</p>
-        <button id="edit-mode-btn" class="edit-mode-btn" onclick="toggleEditMode()">✏️ Edit</button>
+        <div class="welcome-actions">
+          <button id="edit-mode-btn" class="edit-mode-btn" onclick="toggleEditMode()">✏️ Edit</button>
+          <button id="lock-btn" class="edit-mode-btn lock-btn" onclick="masterLogout()" title="Lock">🔒 Lock</button>
+        </div>
       </div>
 
       <div id="groups-grid" class="groups-grid">
@@ -333,6 +336,14 @@
       btn.disabled = false;
       btn.textContent = 'Delete';
     });
+
+    // ========== Master Logout ==========
+    async function masterLogout() {
+      try {
+        await fetch('/api/master-logout', { method: 'POST' });
+      } catch (err) {}
+      window.location.href = '/login';
+    }
 
     // ========== Init ==========
     loadGroups();
