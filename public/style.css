@@ -97,6 +97,44 @@ html, body {
   color: #0a192f;
 }
 
+.tab-disconnected {
+  opacity: 0.5;
+}
+
+.tab-disconnected .tab-icon {
+  background: #991b1b;
+  color: #fca5a5;
+}
+
+/* ========== Reconnect Banner ========== */
+#reconnect-banner {
+  background: #78350f;
+  color: #fcd34d;
+  padding: 6px 12px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+#reconnect-banner button {
+  background: #fcd34d;
+  color: #78350f;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#reconnect-banner button:active {
+  background: #fbbf24;
+}
+
 .tab-label {
   flex: 1;
   font-size: 12px;

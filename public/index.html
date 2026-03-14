@@ -641,54 +641,22 @@
         term.open(container);
         fitAddon.fit();
 
-        // WebSocket (include token for auth)
-        const token = getToken();
-        const ws = new WebSocket(`${getWsUrl()}?id=${id}&token=${token}`);
-
-        ws.onopen = () => {
-          setStatus(`Terminal #${id} connected`);
-          const dims = fitAddon.proposeDimensions();
-          if (dims) {
-            ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
-          }
-        };
-
-        ws.onmessage = (event) => {
-          try {
-            const msg = JSON.parse(event.data);
-            if (msg.type === 'output') {
-              term.write(msg.data);
-            } else if (msg.type === 'exit') {
-              term.write(`\r\n\x1b[31m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
-            } else if (msg.type === 'error') {
-              term.write(`\r\n\x1b[31m[Error: ${msg.message}]\x1b[0m\r\n`);
-            } else if (msg.type === 'kicked') {
-              handleKicked(msg.message);
-            }
-          } catch (err) {
-            term.write(event.data);
-          }
-        };
-
-        ws.onclose = () => {
-          term.write('\r\n\x1b[33m[Disconnected]\x1b[0m\r\n');
-        };
-
-        ws.onerror = () => {};
+        sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null };
+        connectWs(id);
 
         term.onData((data) => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'input', data }));
+          const s = sessions[id];
+          if (s && s.ws && s.ws.readyState === WebSocket.OPEN) {
+            s.ws.send(JSON.stringify({ type: 'input', data }));
           }
         });
 
         term.onResize(({ cols, rows }) => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+          const s = sessions[id];
+          if (s && s.ws && s.ws.readyState === WebSocket.OPEN) {
+            s.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
           }
         });
-
-        sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws };
         document.getElementById('welcome').style.display = 'none';
         switchTab(id);
         updateCount();
@@ -719,6 +687,10 @@
       try { await authFetch(`/api/terminal/${id}`, { method: 'DELETE' }); } catch (err) {}
 
       if (sessions[id]) {
+        // Clear any pending reconnect timer
+        if (sessions[id]._reconnectTimer) clearTimeout(sessions[id]._reconnectTimer);
+        // Mark as intentionally closing so ws.onclose won't show reconnect banner
+        sessions[id]._closing = true;
         if (sessions[id].ws) sessions[id].ws.close();
         sessions[id].terminal.dispose();
         sessions[id].tab.remove();
@@ -729,9 +701,16 @@
       const remaining = Object.keys(sessions);
       if (remaining.length > 0) {
         switchTab(parseInt(remaining[remaining.length - 1]));
+        // Hide reconnect banner if all remaining sessions are connected
+        const anyDisconnected = remaining.some(sid => {
+          const s = sessions[sid];
+          return !s.ws || s.ws.readyState !== WebSocket.OPEN;
+        });
+        if (!anyDisconnected) hideReconnectBanner();
       } else {
         activeId = null;
         document.getElementById('welcome').style.display = 'flex';
+        hideReconnectBanner();
       }
       updateCount();
       setStatus('Terminal closed');
@@ -842,12 +821,45 @@
       term.open(container);
       fitAddon.fit();
 
+      sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null };
+      connectWs(id);
+
+      term.onData((data) => {
+        const s = sessions[id];
+        if (s && s.ws && s.ws.readyState === WebSocket.OPEN) {
+          s.ws.send(JSON.stringify({ type: 'input', data }));
+        }
+      });
+
+      term.onResize(({ cols, rows }) => {
+        const s = sessions[id];
+        if (s && s.ws && s.ws.readyState === WebSocket.OPEN) {
+          s.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        }
+      });
+      switchTab(id);
+    }
+
+    // ---- WebSocket connect/reconnect ----
+    function connectWs(id) {
+      const s = sessions[id];
+      if (!s) return;
+
+      // Close old socket if any
+      if (s.ws) {
+        try { s.ws.close(); } catch(_) {}
+      }
+
       const token = getToken();
       const ws = new WebSocket(`${getWsUrl()}?id=${id}&token=${token}`);
+      s.ws = ws;
+      s._kicked = false;
 
       ws.onopen = () => {
-        setStatus(`Reconnected to #${id}`);
-        const dims = fitAddon.proposeDimensions();
+        setStatus(`Terminal #${id} connected`);
+        hideReconnectBanner();
+        s.tab.classList.remove('tab-disconnected');
+        const dims = s.fitAddon.proposeDimensions();
         if (dims) {
           ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
         }
@@ -857,40 +869,86 @@
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
-            term.write(msg.data);
+            s.terminal.write(msg.data);
           } else if (msg.type === 'exit') {
-            term.write(`\r\n\x1b[31m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
+            s.terminal.write(`\r\n\x1b[31m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
           } else if (msg.type === 'error') {
-            term.write(`\r\n\x1b[31m[Error: ${msg.message}]\x1b[0m\r\n`);
+            s.terminal.write(`\r\n\x1b[31m[Error: ${msg.message}]\x1b[0m\r\n`);
           } else if (msg.type === 'kicked') {
+            s._kicked = true;
             handleKicked(msg.message);
           }
         } catch (err) {
-          term.write(event.data);
+          s.terminal.write(event.data);
         }
       };
 
       ws.onclose = () => {
-        term.write('\r\n\x1b[33m[Disconnected]\x1b[0m\r\n');
+        if (s._kicked || s._closing) return; // don't reconnect if kicked or intentionally closed
+        s.tab.classList.add('tab-disconnected');
+        setStatus('Disconnected');
+        showReconnectBanner();
+        // Auto-retry after 3s
+        s._reconnectTimer = setTimeout(() => {
+          if (sessions[id] && (!sessions[id].ws || sessions[id].ws.readyState !== WebSocket.OPEN)) {
+            connectWs(id);
+          }
+        }, 3000);
       };
 
       ws.onerror = () => {};
-
-      term.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'input', data }));
-        }
-      });
-
-      term.onResize(({ cols, rows }) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-        }
-      });
-
-      sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws };
-      switchTab(id);
     }
+
+    // ---- Reconnect banner ----
+    function showReconnectBanner() {
+      let banner = document.getElementById('reconnect-banner');
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'reconnect-banner';
+        banner.innerHTML = `
+          <span>Connection lost — reconnecting...</span>
+          <button onclick="reconnectAll()">Reconnect Now</button>
+        `;
+        document.getElementById('app').insertBefore(banner, document.getElementById('terminal-area'));
+      }
+      banner.style.display = 'flex';
+    }
+
+    function hideReconnectBanner() {
+      const banner = document.getElementById('reconnect-banner');
+      if (banner) banner.style.display = 'none';
+    }
+
+    function reconnectAll() {
+      setStatus('Reconnecting...');
+      for (const [id, s] of Object.entries(sessions)) {
+        if (s._reconnectTimer) clearTimeout(s._reconnectTimer);
+        if (!s.ws || s.ws.readyState !== WebSocket.OPEN) {
+          connectWs(parseInt(id));
+        }
+      }
+    }
+
+    // ---- Visibility change: reconnect when app comes back to foreground ----
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        // Small delay to let network recover
+        setTimeout(() => {
+          let anyDead = false;
+          for (const [id, s] of Object.entries(sessions)) {
+            if (!s.ws || s.ws.readyState !== WebSocket.OPEN) {
+              anyDead = true;
+              connectWs(parseInt(id));
+            }
+          }
+          if (!anyDead) hideReconnectBanner();
+          // Re-fit active terminal
+          if (activeId && sessions[activeId]) {
+            sessions[activeId].fitAddon.fit();
+          }
+        }, 500);
+      }
+    });
 
     // Load group info and display in status bar
     async function loadGroupInfo() {
