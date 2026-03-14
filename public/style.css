@@ -263,6 +263,177 @@ html, body {
   margin-top: 2px;
 }
 
+/* ---- Mode toggle (Shell / Claude) ---- */
+.vk-mode-toggle {
+  gap: 4px;
+  padding: 0 4px 2px;
+  justify-content: center;
+}
+
+.vk-mode-btn {
+  flex: 1;
+  max-width: 120px;
+  min-height: 28px;
+  background: #1a1a2e;
+  color: #6b7280;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+  padding: 0;
+}
+
+.vk-mode-btn.active {
+  background: #1e3a5f;
+  color: #93c5fd;
+  border-color: #2563eb;
+  box-shadow: 0 0 6px rgba(37, 99, 235, 0.3);
+}
+
+.vk-mode-btn:active {
+  transform: scale(0.95);
+}
+
+/* ---- Claude Code key styling ---- */
+.vk-claude {
+  background: #1e1b4b !important;
+  color: #a78bfa !important;
+  border-color: #4c1d95 !important;
+}
+
+.vk-claude:active {
+  background: #5b21b6 !important;
+  color: #fff !important;
+}
+
+.vk-claude-warn {
+  background: #4a1942 !important;
+  color: #f0abfc !important;
+  border-color: #701a75 !important;
+}
+
+.vk-claude-warn:active {
+  background: #a21caf !important;
+  color: #fff !important;
+}
+
+/* ---- Links badge on mode button ---- */
+.vk-links-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #dc2626;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  padding: 0 4px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.vk-links-badge.hidden {
+  display: none !important;
+}
+
+/* ---- Links panel ---- */
+.links-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid #1f2937;
+}
+
+.links-panel-title {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.links-panel-clear {
+  background: none;
+  border: 1px solid #374151;
+  color: #6b7280;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.links-panel-clear:active {
+  background: #7f1d1d;
+  color: #fca5a5;
+  border-color: #991b1b;
+}
+
+.links-panel-list {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 4px 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.links-panel-empty {
+  color: #4a5568;
+  font-size: 12px;
+  text-align: center;
+  padding: 16px 12px;
+  line-height: 1.5;
+}
+
+.links-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+  min-height: 36px;
+}
+
+.links-panel-row:active {
+  background: #0f3460;
+}
+
+.links-panel-row[data-type="url"]:active {
+  background: #1e3a5f;
+}
+
+.links-panel-row[data-type="file"]:active {
+  background: #1e1b4b;
+}
+
+.links-panel-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+}
+
+.links-panel-text {
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px;
+  color: #93c5fd;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.links-panel-row[data-type="file"] .links-panel-text {
+  color: #c4b5fd;
+}
+
 .vk-expanded.hidden {
   display: none;
 }
@@ -528,6 +699,14 @@ html, body {
   .vk-key {
     min-height: 36px;
     font-size: 11px;
+  }
+
+  .links-panel-list {
+    max-height: 150px;
+  }
+
+  .links-panel-row {
+    min-height: 40px;
   }
 }
 
@@ -1481,4 +1660,110 @@ html, body {
 
 .hidden {
   display: none !important;
+}
+
+/* ========== File Viewer ========== */
+.file-viewer-container {
+  display: flex !important;
+  flex-direction: column;
+  background: #0a192f;
+  overflow: hidden;
+}
+
+.file-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: #16213e;
+  border-bottom: 1px solid #0f3460;
+  flex-shrink: 0;
+  gap: 12px;
+  min-height: 36px;
+}
+
+.file-viewer-path {
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  color: #8892b0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.file-viewer-meta {
+  font-size: 11px;
+  color: #4a5568;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.file-viewer-content {
+  flex: 1;
+  overflow: auto;
+  padding: 0;
+  min-height: 0;
+}
+
+.file-viewer-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.file-line-num {
+  color: #4a5568;
+  text-align: right;
+  padding: 0 12px 0 8px;
+  user-select: none;
+  white-space: nowrap;
+  vertical-align: top;
+  min-width: 48px;
+  border-right: 1px solid #1a1a2e;
+}
+
+.file-line-code {
+  color: #d2d2d2;
+  padding: 0 16px;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.file-viewer-highlight-line {
+  background: rgba(100, 255, 218, 0.08);
+}
+
+.file-viewer-highlight-line .file-line-num {
+  color: #64ffda;
+  background: rgba(100, 255, 218, 0.12);
+}
+
+/* File tab icon */
+.file-tab-icon {
+  font-size: 12px;
+  background: #3b0764 !important;
+  color: #c084fc !important;
+}
+
+@media (max-width: 768px) {
+  .file-viewer-table {
+    font-size: 11px;
+  }
+
+  .file-viewer-header {
+    padding: 6px 10px;
+  }
+
+  .file-line-num {
+    padding: 0 8px 0 4px;
+    min-width: 36px;
+  }
+
+  .file-line-code {
+    padding: 0 8px;
+  }
 }

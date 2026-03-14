@@ -6,6 +6,57 @@ const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 
+// ========== Logging System ==========
+const LOG_DIR = path.join(__dirname, 'logs');
+if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+
+function getLogFileName() {
+  const d = new Date();
+  return `hub-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}.log`;
+}
+
+function timestamp() {
+  return new Date().toISOString();
+}
+
+function writeLog(level, category, message, extra) {
+  const ts = timestamp();
+  const line = extra
+    ? `[${ts}] [${level}] [${category}] ${message} | ${JSON.stringify(extra)}`
+    : `[${ts}] [${level}] [${category}] ${message}`;
+
+  // Console output
+  if (level === 'ERROR' || level === 'FATAL') {
+    process.stderr.write(line + '\n');
+  } else {
+    process.stdout.write(line + '\n');
+  }
+
+  // File output
+  try {
+    fs.appendFileSync(path.join(LOG_DIR, getLogFileName()), line + '\n');
+  } catch (_) {}
+}
+
+const log = {
+  info:  (cat, msg, extra) => writeLog('INFO',  cat, msg, extra),
+  warn:  (cat, msg, extra) => writeLog('WARN',  cat, msg, extra),
+  error: (cat, msg, extra) => writeLog('ERROR', cat, msg, extra),
+  fatal: (cat, msg, extra) => writeLog('FATAL', cat, msg, extra),
+};
+
+// ========== Global Error Handlers ==========
+process.on('uncaughtException', (err) => {
+  log.fatal('process', `Uncaught Exception: ${err.message}`, { stack: err.stack });
+  // Keep running — don't crash on recoverable errors
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  const stack = reason instanceof Error ? reason.stack : undefined;
+  log.error('process', `Unhandled Rejection: ${msg}`, { stack });
+});
+
 const app = express();
 const PORT = process.env.HUB_PORT || 9091;
 
@@ -14,9 +65,9 @@ let groupsConfig = [];
 try {
   const raw = fs.readFileSync(path.join(__dirname, 'groups.json'), 'utf-8');
   groupsConfig = JSON.parse(raw).groups || [];
-  console.log(`[groups] Loaded ${groupsConfig.length} groups: ${groupsConfig.map(g => g.name).join(', ')}`);
+  log.info('groups', `Loaded ${groupsConfig.length} groups: ${groupsConfig.map(g => g.name).join(', ')}`);
 } catch (err) {
-  console.error('[groups] Failed to load groups.json, using defaults:', err.message);
+  log.error('groups', `Failed to load groups.json, using defaults: ${err.message}`);
   groupsConfig = [
     { name: 'Dev', icon: '🛠', color: '#64ffda', maxTerminals: 10 },
     { name: 'Ops', icon: '🖥', color: '#f78c6c', maxTerminals: 10 }
@@ -27,7 +78,7 @@ const GROUPS_FILE = path.join(__dirname, 'groups.json');
 
 function saveGroups() {
   fs.writeFileSync(GROUPS_FILE, JSON.stringify({ groups: groupsConfig }, null, 2), 'utf-8');
-  console.log(`[groups] Saved ${groupsConfig.length} groups to groups.json`);
+  log.info('groups', `Saved ${groupsConfig.length} groups to groups.json`);
 }
 
 // ========== Master Password Config ==========
@@ -39,9 +90,9 @@ function loadAuthConfig() {
     const raw = fs.readFileSync(AUTH_FILE, 'utf-8');
     authConfig = JSON.parse(raw);
     if (!authConfig.masterTokens) authConfig.masterTokens = [];
-    console.log(`[auth] Master password configured: ${authConfig.passwordHash ? 'YES' : 'NO'}`);
+    log.info('auth', `Master password configured: ${authConfig.passwordHash ? 'YES' : 'NO'}`);
   } catch (err) {
-    console.log('[auth] No auth.json found — master password not set.');
+    log.info('auth', 'No auth.json found — master password not set.');
     authConfig = { passwordHash: null, masterTokens: [] };
   }
 }
@@ -149,6 +200,26 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
+// ========== Request Logging Middleware ==========
+app.use((req, res, next) => {
+  const start = Date.now();
+  const originalEnd = res.end;
+  res.end = function(...args) {
+    const duration = Date.now() - start;
+    const status = res.statusCode;
+    // Only log API requests and errors (skip static assets to reduce noise)
+    if (req.path.startsWith('/api/') || status >= 400) {
+      const level = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
+      log[level]('http', `${req.method} ${req.path} → ${status} (${duration}ms)`, {
+        ip: req.ip || req.connection?.remoteAddress,
+        query: Object.keys(req.query).length ? req.query : undefined,
+      });
+    }
+    originalEnd.apply(this, args);
+  };
+  next();
+});
+
 // ========== Master Auth Middleware ==========
 function masterAuthMiddleware(req, res, next) {
   // Always allow: login page, master auth APIs, static assets
@@ -209,7 +280,7 @@ app.post('/api/master-setup', async (req, res) => {
   });
   saveAuthConfig();
 
-  console.log('[auth] Master password set for the first time.');
+  log.info('auth', 'Master password set for the first time.');
 
   res.cookie('master_token', rawToken, {
     httpOnly: true,
@@ -233,7 +304,7 @@ app.post('/api/master-login', async (req, res) => {
 
   const valid = await verifyPassword(password, authConfig.passwordHash);
   if (!valid) {
-    console.log('[auth] Master login failed: wrong password');
+    log.warn('auth', 'Master login failed: wrong password');
     return res.status(401).json({ error: 'Wrong password.' });
   }
 
@@ -262,7 +333,7 @@ app.post('/api/master-login', async (req, res) => {
     path: '/'
   });
 
-  console.log(`[auth] Master login successful (remember: ${!!remember})`);
+  log.info('auth', `Master login successful (remember: ${!!remember})`);
   res.json({ ok: true });
 });
 
@@ -276,7 +347,7 @@ app.post('/api/master-logout', (req, res) => {
   res.clearCookie('master_token');
   res.clearCookie('token');
   res.clearCookie('group');
-  console.log('[auth] Master logout');
+  log.info('auth', 'Master logout');
   res.json({ ok: true });
 });
 
@@ -338,7 +409,7 @@ app.post('/api/groups', (req, res) => {
   };
   groupsConfig.push(newGroup);
   saveGroups();
-  console.log(`[groups] Created group "${trimmed}"`);
+  log.info('groups', `Created group "${trimmed}"`);
   res.json({ ok: true, group: newGroup });
 });
 
@@ -378,7 +449,7 @@ app.put('/api/groups/:name', (req, res) => {
   }
 
   saveGroups();
-  console.log(`[groups] Updated group "${oldName}"${newName !== oldName ? ` → "${newName}"` : ''}`);
+  log.info('groups', `Updated group "${oldName}"${newName !== oldName ? ` → "${newName}"` : ''}`);
   res.json({ ok: true, group: groupsConfig[idx] });
 });
 
@@ -417,7 +488,7 @@ app.delete('/api/groups/:name', (req, res) => {
   // Remove from config
   groupsConfig.splice(idx, 1);
   saveGroups();
-  console.log(`[groups] Deleted group "${name}" (killed ${groupTerminalIds.length} terminals)`);
+  log.info('groups', `Deleted group "${name}" (killed ${groupTerminalIds.length} terminals)`);
   res.json({ ok: true, deleted: name, terminalsKilled: groupTerminalIds.length });
 });
 
@@ -436,7 +507,7 @@ app.post('/api/login', (req, res) => {
   const newToken = generateToken();
   groupTokens.set(group, { token: newToken, created: new Date().toISOString() });
 
-  console.log(`[auth] New login to group "${group}". Previous session for this group invalidated.`);
+  log.info('auth', `New login to group "${group}". Previous session for this group invalidated.`);
 
   // Kick only clients in this group
   if (oldTokenInfo) {
@@ -545,6 +616,55 @@ app.get('/api/fs/browse', async (req, res) => {
   }
 });
 
+// GET /api/fs/read?path=<abs_path> — read file contents for file viewer
+app.get('/api/fs/read', async (req, res) => {
+  const filePath = req.query.path;
+  if (!filePath) {
+    return res.status(400).json({ error: 'Path is required' });
+  }
+
+  try {
+    const resolved = path.resolve(filePath);
+    const real = await fsPromises.realpath(resolved);
+    const stat = await fsPromises.stat(real);
+
+    if (!stat.isFile()) {
+      return res.status(404).json({ error: 'Not a file' });
+    }
+
+    const MAX_FILE_SIZE = 1048576; // 1 MB
+    if (stat.size > MAX_FILE_SIZE) {
+      return res.status(413).json({ error: `File too large (${(stat.size / 1024).toFixed(0)} KB, max 1 MB)` });
+    }
+
+    // Binary detection: check first 8KB for null bytes
+    const buf = Buffer.alloc(Math.min(8192, stat.size));
+    const fd = await fsPromises.open(real, 'r');
+    await fd.read(buf, 0, buf.length, 0);
+    await fd.close();
+    if (buf.includes(0)) {
+      return res.status(415).json({ error: 'Binary file cannot be displayed' });
+    }
+
+    const content = await fsPromises.readFile(real, 'utf-8');
+    res.json({
+      path: real,
+      name: path.basename(real),
+      content,
+      size: stat.size,
+      extension: path.extname(real).toLowerCase()
+    });
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    if (err.code === 'EACCES' || err.code === 'EPERM') {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // Serve static files (after auth)
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -617,7 +737,7 @@ app.post('/api/terminal/new', async (req, res) => {
     shellLabel = 'bash';
   }
 
-  console.log(`[pty] Creating terminal ${id} for group "${group}": ${shellCmd} (${cols}x${rows}) cwd=${cwd}`);
+  log.info('pty', `Creating terminal ${id} for group "${group}": ${shellCmd} (${cols}x${rows}) cwd=${cwd}`);
 
   try {
     const ptyProc = pty.spawn(shellCmd, [], {
@@ -647,7 +767,7 @@ app.post('/api/terminal/new', async (req, res) => {
     });
 
     ptyProc.onExit(({ exitCode }) => {
-      console.log(`[pty:${id}] Exited with code ${exitCode}`);
+      log.info('pty', `Terminal ${id} exited with code ${exitCode}`);
       const info = terminals.get(id);
       if (info) {
         for (const ws of info.clients) {
@@ -672,7 +792,7 @@ app.post('/api/terminal/new', async (req, res) => {
 
     res.json({ id, shell: shellLabel, cols, rows, group, cwd });
   } catch (err) {
-    console.error(`[pty] Failed to create terminal:`, err);
+    log.error('pty', `Failed to create terminal: ${err.message}`, { stack: err.stack });
     res.status(500).json({ error: err.message });
   }
 });
@@ -722,7 +842,7 @@ server.on('upgrade', (req, socket, head) => {
       if (key) cookies[key.trim()] = val.join('=').trim();
     });
     if (!isValidMasterToken(cookies.master_token)) {
-      console.log(`[ws] Rejected: invalid master token`);
+      log.warn('ws', 'Rejected: invalid master token');
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
       return;
@@ -732,7 +852,7 @@ server.on('upgrade', (req, socket, head) => {
   const token = url.searchParams.get('token');
   const group = getGroupForToken(token);
   if (!group) {
-    console.log(`[ws] Rejected: invalid token`);
+    log.warn('ws', 'Rejected: invalid group token');
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     socket.destroy();
     return;
@@ -768,7 +888,7 @@ wss.on('connection', (ws, req) => {
     return;
   }
 
-  console.log(`[ws] Client connected to terminal ${id} (group: ${ws._group})`);
+  log.info('ws', `Client connected to terminal ${id} (group: ${ws._group})`);
   info.clients.add(ws);
 
   // Send buffered output
@@ -801,7 +921,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
-    console.log(`[ws] Client disconnected from terminal ${id}`);
+    log.info('ws', `Client disconnected from terminal ${id}`);
     info.clients.delete(ws);
   });
 });
@@ -821,19 +941,20 @@ function kickGroupClients(groupName, reason) {
 }
 
 server.listen(PORT, () => {
-  console.log(`\n========================================`);
-  console.log(`  Web Terminal Hub running on port ${PORT}`);
-  console.log(`  Groups: ${groupsConfig.map(g => g.name).join(', ')}`);
-  console.log(`  Master password: ${authConfig.passwordHash ? 'ENABLED' : 'NOT SET (visit /login to set up)'}`);
-  console.log(`  http://localhost:${PORT}`);
-  console.log(`========================================\n`);
+  log.info('server', `========================================`);
+  log.info('server', `Web Terminal Hub running on port ${PORT}`);
+  log.info('server', `Groups: ${groupsConfig.map(g => g.name).join(', ')}`);
+  log.info('server', `Master password: ${authConfig.passwordHash ? 'ENABLED' : 'NOT SET (visit /login to set up)'}`);
+  log.info('server', `Log file: ${path.join(LOG_DIR, getLogFileName())}`);
+  log.info('server', `http://localhost:${PORT}`);
+  log.info('server', `========================================`);
 });
 
 process.on('SIGINT', cleanup);
 process.on('SIGTERM', cleanup);
 
 function cleanup() {
-  console.log('\n[hub] Shutting down...');
+  log.info('server', 'Shutting down...');
   for (const [id, info] of terminals) {
     try { info.pty.kill(); } catch (_) {}
   }

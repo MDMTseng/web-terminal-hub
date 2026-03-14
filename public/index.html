@@ -60,48 +60,94 @@
       </div>
       <!-- Expanded rows (hidden by default) -->
       <div id="vk-expanded" class="vk-expanded hidden">
-        <!-- Row 1: modifier toggles -->
-        <div class="vk-row vk-modifiers">
-          <button class="vk-key vk-toggle" data-mod="ctrl" id="vk-ctrl">Ctrl</button>
-          <button class="vk-key vk-toggle" data-mod="alt" id="vk-alt">Alt</button>
-          <button class="vk-key vk-toggle" data-mod="shift" id="vk-shift">Shift</button>
-          <button class="vk-key vk-action" data-key="Escape">Esc</button>
+        <!-- Mode toggle: Shell / Claude / Links -->
+        <div class="vk-row vk-mode-toggle">
+          <button class="vk-mode-btn" id="vk-mode-shell" onclick="switchVkMode('shell')">Shell</button>
+          <button class="vk-mode-btn active" id="vk-mode-claude" onclick="switchVkMode('claude')">Claude</button>
+          <button class="vk-mode-btn" id="vk-mode-links" onclick="switchVkMode('links')">Links <span id="vk-links-badge" class="vk-links-badge hidden">0</span></button>
         </div>
-        <!-- Row 2: arrows -->
-        <div class="vk-row">
-          <button class="vk-key vk-action" data-key="ArrowUp">▲</button>
-          <button class="vk-key vk-action" data-key="ArrowDown">▼</button>
-          <button class="vk-key vk-action" data-key="Home">Home</button>
-          <button class="vk-key vk-action" data-key="End">End</button>
+
+        <!-- ===== Claude Code Keys ===== -->
+        <div id="vk-claude-keys">
+          <!-- Row: model & thinking -->
+          <div class="vk-row">
+            <button class="vk-key vk-claude" data-seq="\x1bp">Model</button>
+            <button class="vk-key vk-claude" data-seq="\x1bt">Think</button>
+            <button class="vk-key vk-claude" data-combo="ctrl+o">Verbose</button>
+            <button class="vk-key vk-claude" data-combo="ctrl+l">Clear</button>
+          </div>
+          <!-- Row: actions -->
+          <div class="vk-row">
+            <button class="vk-key vk-claude" data-combo="ctrl+b">BgTask</button>
+            <button class="vk-key vk-claude" data-seq="\x1b[Z">AutoMode</button>
+            <button class="vk-key vk-claude" data-combo="ctrl+g">Editor</button>
+            <button class="vk-key vk-claude-warn" data-combo="ctrl+f">KillBg</button>
+          </div>
+          <!-- Row: input helpers -->
+          <div class="vk-row">
+            <button class="vk-key vk-claude" data-seq="\x1b\x1b">Rewind</button>
+            <button class="vk-key vk-claude" data-seq="\x5c\x0a">Newline</button>
+            <button class="vk-key vk-claude" data-char="@">@File</button>
+            <button class="vk-key vk-claude" data-char="/">/Cmd</button>
+          </div>
         </div>
-        <!-- Row 3: signals + editing -->
-        <div class="vk-row">
-          <button class="vk-key vk-warn" data-combo="ctrl+d">^D</button>
-          <button class="vk-key vk-warn" data-combo="ctrl+z">^Z</button>
-          <button class="vk-key vk-action" data-combo="ctrl+l">Clear</button>
-          <button class="vk-key vk-action" data-combo="ctrl+a">^A</button>
-          <button class="vk-key vk-action" data-combo="ctrl+e">^E</button>
+
+        <!-- ===== Shell Keys ===== -->
+        <div id="vk-shell-keys" class="hidden">
+          <!-- Row 1: modifier toggles -->
+          <div class="vk-row vk-modifiers">
+            <button class="vk-key vk-toggle" data-mod="ctrl" id="vk-ctrl">Ctrl</button>
+            <button class="vk-key vk-toggle" data-mod="alt" id="vk-alt">Alt</button>
+            <button class="vk-key vk-toggle" data-mod="shift" id="vk-shift">Shift</button>
+            <button class="vk-key vk-action" data-key="Escape">Esc</button>
+          </div>
+          <!-- Row 2: arrows -->
+          <div class="vk-row">
+            <button class="vk-key vk-action" data-key="ArrowUp">&#x25B2;</button>
+            <button class="vk-key vk-action" data-key="ArrowDown">&#x25BC;</button>
+            <button class="vk-key vk-action" data-key="Home">Home</button>
+            <button class="vk-key vk-action" data-key="End">End</button>
+          </div>
+          <!-- Row 3: signals + editing -->
+          <div class="vk-row">
+            <button class="vk-key vk-warn" data-combo="ctrl+d">^D</button>
+            <button class="vk-key vk-warn" data-combo="ctrl+z">^Z</button>
+            <button class="vk-key vk-action" data-combo="ctrl+l">Clear</button>
+            <button class="vk-key vk-action" data-combo="ctrl+a">^A</button>
+            <button class="vk-key vk-action" data-combo="ctrl+e">^E</button>
+          </div>
+          <!-- Row 4: pipe, redirect, special -->
+          <div class="vk-row">
+            <button class="vk-key vk-action" data-combo="ctrl+r">^R</button>
+            <button class="vk-key vk-action" data-char="|">|</button>
+            <button class="vk-key vk-action" data-char="&">&amp;</button>
+            <button class="vk-key vk-action" data-char=">">&gt;</button>
+            <button class="vk-key vk-action" data-char="<">&lt;</button>
+            <button class="vk-key vk-action" data-char="~">~</button>
+            <button class="vk-key vk-action" data-char="/">/</button>
+          </div>
+          <!-- Row 5: symbols -->
+          <div class="vk-row">
+            <button class="vk-key vk-action" data-char="-">-</button>
+            <button class="vk-key vk-action" data-char="_">_</button>
+            <button class="vk-key vk-action" data-char=".">.</button>
+            <button class="vk-key vk-action" data-char="*">*</button>
+            <button class="vk-key vk-action" data-char="$">$</button>
+            <button class="vk-key vk-action" data-char="(">(</button>
+            <button class="vk-key vk-action" data-char=")">)</button>
+            <button class="vk-key vk-action" data-char=";">;</button>
+          </div>
         </div>
-        <!-- Row 4: pipe, redirect, special -->
-        <div class="vk-row">
-          <button class="vk-key vk-action" data-combo="ctrl+r">^R</button>
-          <button class="vk-key vk-action" data-char="|">|</button>
-          <button class="vk-key vk-action" data-char="&">&amp;</button>
-          <button class="vk-key vk-action" data-char=">">&gt;</button>
-          <button class="vk-key vk-action" data-char="<">&lt;</button>
-          <button class="vk-key vk-action" data-char="~">~</button>
-          <button class="vk-key vk-action" data-char="/">/</button>
-        </div>
-        <!-- Row 5: symbols -->
-        <div class="vk-row">
-          <button class="vk-key vk-action" data-char="-">-</button>
-          <button class="vk-key vk-action" data-char="_">_</button>
-          <button class="vk-key vk-action" data-char=".">.</button>
-          <button class="vk-key vk-action" data-char="*">*</button>
-          <button class="vk-key vk-action" data-char="$">$</button>
-          <button class="vk-key vk-action" data-char="(">(</button>
-          <button class="vk-key vk-action" data-char=")">)</button>
-          <button class="vk-key vk-action" data-char=";">;</button>
+
+        <!-- ===== Links Panel ===== -->
+        <div id="vk-links-panel" class="hidden">
+          <div class="links-panel-header">
+            <span class="links-panel-title">Captured URLs & File Paths</span>
+            <button class="links-panel-clear" onclick="clearCapturedLinks()" title="Clear all">Clear</button>
+          </div>
+          <div id="links-panel-list" class="links-panel-list">
+            <div class="links-panel-empty">No links captured yet. URLs and file paths from terminal output will appear here.</div>
+          </div>
         </div>
       </div>
     </div>
@@ -474,6 +520,16 @@
         return;
       }
 
+      // Raw escape sequence (Claude Code keys: Alt+P, Esc+Esc, etc.)
+      if (btn.dataset.seq) {
+        const raw = btn.dataset.seq
+          .replace(/\\x1b/g, '\x1b')
+          .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+        sendKey(raw);
+        resetModifiers();
+        return;
+      }
+
       // Special key (arrows, tab, esc)
       if (btn.dataset.key) {
         let seq = getEscapeSequence(btn.dataset.key);
@@ -535,6 +591,83 @@
       }
     });
 
+    // ---- Virtual keyboard mode toggle (Shell / Claude) ----
+    let vkMode = localStorage.getItem('termhub_vk_mode') || 'claude';
+
+    function switchVkMode(mode) {
+      vkMode = mode;
+      // Only persist shell/claude preference (not links — it's a temporary view)
+      if (mode !== 'links') localStorage.setItem('termhub_vk_mode', mode);
+      document.getElementById('vk-claude-keys').classList.toggle('hidden', mode !== 'claude');
+      document.getElementById('vk-shell-keys').classList.toggle('hidden', mode !== 'shell');
+      document.getElementById('vk-links-panel').classList.toggle('hidden', mode !== 'links');
+      document.getElementById('vk-mode-claude').classList.toggle('active', mode === 'claude');
+      document.getElementById('vk-mode-shell').classList.toggle('active', mode === 'shell');
+      document.getElementById('vk-mode-links').classList.toggle('active', mode === 'links');
+      // Re-fit terminal after keyboard layout change
+      if (activeId && sessions[activeId]) {
+        setTimeout(() => {
+          if (sessions[activeId].fitAddon) sessions[activeId].fitAddon.fit();
+        }, 100);
+      }
+    }
+
+    // Apply saved mode on load
+    switchVkMode(vkMode);
+
+    // ---- Links panel rendering ----
+    function renderLinksPanel() {
+      const list = document.getElementById('links-panel-list');
+      const badge = document.getElementById('vk-links-badge');
+
+      // Update badge count
+      badge.textContent = capturedLinks.length;
+      badge.classList.toggle('hidden', capturedLinks.length === 0);
+
+      if (capturedLinks.length === 0) {
+        list.innerHTML = '<div class="links-panel-empty">No links captured yet. URLs and file paths from terminal output will appear here.</div>';
+        return;
+      }
+
+      const frag = document.createDocumentFragment();
+      for (const link of capturedLinks) {
+        const row = document.createElement('div');
+        row.className = 'links-panel-row';
+        row.dataset.type = link.type;
+
+        const icon = document.createElement('span');
+        icon.className = 'links-panel-icon';
+        icon.textContent = link.type === 'url' ? '🌐' : '📄';
+
+        const text = document.createElement('span');
+        text.className = 'links-panel-text';
+        text.textContent = link.text;
+        text.title = link.text;
+
+        row.appendChild(icon);
+        row.appendChild(text);
+
+        row.addEventListener('click', () => {
+          if (link.type === 'url') {
+            window.open(link.text, '_blank', 'noopener');
+          } else {
+            openFileInViewer(link.text);
+          }
+        });
+
+        frag.appendChild(row);
+      }
+
+      list.innerHTML = '';
+      list.appendChild(frag);
+    }
+
+    function clearCapturedLinks() {
+      capturedLinks.length = 0;
+      capturedLinksSet.clear();
+      renderLinksPanel();
+    }
+
     // ---- Zoom: cycle font sizes ----
     const ZOOM_LEVELS = [
       { size: 9,  label: 'A⁻' },
@@ -548,8 +681,9 @@
     function applyZoom() {
       const level = ZOOM_LEVELS[zoomIndex];
       document.getElementById('vk-zoom-btn').textContent = level.label;
-      // Apply to all terminals
+      // Apply to all terminal sessions (skip file viewers)
       for (const [id, s] of Object.entries(sessions)) {
+        if (!s.terminal) continue;
         s.terminal.options.fontSize = level.size;
         s.fitAddon.fit();
       }
@@ -641,7 +775,7 @@
         term.open(container);
         fitAddon.fit();
 
-        sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null };
+        sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null, cwd: cwd || '' };
         connectWs(id);
 
         term.onData((data) => {
@@ -666,6 +800,198 @@
       }
     }
 
+    // ---- Link detection from terminal output ----
+    const FILE_PATH_REGEX = /(?:[A-Za-z]:[\\\/]|\/(?!\/)|~\/|\.\/|\.\.\/)[^\s:,"'`()\[\]{}|<>]+\.\w+(?::\d+(?::\d+)?)?/g;
+    const URL_REGEX = /https?:\/\/[^\s"'`<>()[\]{}]+/gi;
+    let nextFileViewerId = 10000;
+
+    // Captured links: { text, type: 'url'|'file', timestamp }
+    const capturedLinks = [];
+    const MAX_CAPTURED_LINKS = 100;
+    const capturedLinksSet = new Set(); // deduplicate by text
+
+    // Strip ANSI escape codes from terminal output before scanning
+    function stripAnsi(str) {
+      return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+                .replace(/\x1b\][^\x07]*\x07/g, '')
+                .replace(/\x1b[()][AB012]/g, '')
+                .replace(/\x1b[\x20-\x2F][\x30-\x7E]/g, '');
+    }
+
+    function scanOutputForLinks(rawData) {
+      const data = stripAnsi(rawData);
+      let found = false;
+
+      // Scan for URLs
+      URL_REGEX.lastIndex = 0;
+      let match;
+      while ((match = URL_REGEX.exec(data)) !== null) {
+        let url = match[0];
+        // Trim trailing punctuation that's likely not part of URL
+        url = url.replace(/[.,;:!?)]+$/, '');
+        if (!capturedLinksSet.has(url)) {
+          capturedLinksSet.add(url);
+          capturedLinks.unshift({ text: url, type: 'url', timestamp: Date.now() });
+          found = true;
+        }
+      }
+
+      // Scan for file paths
+      FILE_PATH_REGEX.lastIndex = 0;
+      while ((match = FILE_PATH_REGEX.exec(data)) !== null) {
+        const fp = match[0];
+        if (!capturedLinksSet.has(fp)) {
+          capturedLinksSet.add(fp);
+          capturedLinks.unshift({ text: fp, type: 'file', timestamp: Date.now() });
+          found = true;
+        }
+      }
+
+      // Trim to max
+      while (capturedLinks.length > MAX_CAPTURED_LINKS) {
+        const removed = capturedLinks.pop();
+        capturedLinksSet.delete(removed.text);
+      }
+
+      if (found) renderLinksPanel();
+    }
+
+    async function openFileInViewer(rawPath) {
+      // Strip line:col suffix
+      let filePath = rawPath;
+      let lineNumber = null;
+      const lineColMatch = rawPath.match(/^(.+?):(\d+)(?::\d+)?$/);
+      if (lineColMatch) {
+        filePath = lineColMatch[1];
+        lineNumber = parseInt(lineColMatch[2]);
+      }
+
+      // Resolve relative paths against the active terminal's cwd
+      if (filePath && !filePath.match(/^[A-Za-z]:[\\\/]/) && !filePath.startsWith('/') && !filePath.startsWith('~')) {
+        const activeSess = sessions[activeId];
+        if (activeSess && activeSess.cwd) {
+          const sep = activeSess.cwd.includes('\\') ? '\\' : '/';
+          filePath = activeSess.cwd + (activeSess.cwd.endsWith(sep) ? '' : sep) + filePath;
+        }
+      }
+
+      setStatus(`Opening ${filePath}...`);
+
+      try {
+        const resp = await authFetch(`/api/fs/read?path=${encodeURIComponent(filePath)}`);
+        const data = await resp.json();
+
+        if (data.error) {
+          setStatus(`Error: ${data.error}`);
+          return;
+        }
+
+        // Check if file is already open — switch to existing tab
+        for (const [existingId, s] of Object.entries(sessions)) {
+          if (s.type === 'file' && s.filePath === data.path) {
+            switchTab(parseInt(existingId) || existingId);
+            setStatus(`Already open: ${data.name}`);
+            return;
+          }
+        }
+
+        const id = nextFileViewerId++;
+
+        // Create tab
+        const tabEl = document.createElement('div');
+        tabEl.className = 'tab';
+        tabEl.dataset.id = id;
+        tabEl.innerHTML = `
+          <span class="tab-icon file-tab-icon">&#x1F4C4;</span>
+          <span class="tab-label">${escapeHtml(data.name)}</span>
+          <button class="tab-close" title="Close">&times;</button>
+        `;
+        tabEl.addEventListener('click', (e) => {
+          if (!e.target.classList.contains('tab-close')) switchTab(id);
+        });
+        tabEl.querySelector('.tab-close').addEventListener('click', (e) => {
+          e.stopPropagation();
+          closeTerminal(id);
+        });
+        document.getElementById('tabs').appendChild(tabEl);
+
+        // Create file viewer container
+        const container = document.createElement('div');
+        container.className = 'terminal-container file-viewer-container';
+        container.dataset.id = id;
+
+        // Header
+        const header = document.createElement('div');
+        header.className = 'file-viewer-header';
+        header.innerHTML = `
+          <span class="file-viewer-path" title="${escapeHtml(data.path)}">${escapeHtml(data.path)}</span>
+          <span class="file-viewer-meta">${formatFileSize(data.size)} &middot; ${escapeHtml(data.extension || 'text')}</span>
+        `;
+        container.appendChild(header);
+
+        // Content with line numbers
+        const contentArea = document.createElement('div');
+        contentArea.className = 'file-viewer-content';
+
+        const lines = data.content.split('\n');
+        const table = document.createElement('table');
+        table.className = 'file-viewer-table';
+
+        for (let i = 0; i < lines.length; i++) {
+          const tr = document.createElement('tr');
+          if (lineNumber && i + 1 === lineNumber) {
+            tr.className = 'file-viewer-highlight-line';
+          }
+          const tdNum = document.createElement('td');
+          tdNum.className = 'file-line-num';
+          tdNum.textContent = i + 1;
+          const tdCode = document.createElement('td');
+          tdCode.className = 'file-line-code';
+          tdCode.textContent = lines[i];
+          tr.appendChild(tdNum);
+          tr.appendChild(tdCode);
+          table.appendChild(tr);
+        }
+
+        contentArea.appendChild(table);
+        container.appendChild(contentArea);
+        document.getElementById('terminal-area').appendChild(container);
+
+        // Store session
+        sessions[id] = {
+          type: 'file',
+          tab: tabEl,
+          container,
+          terminal: null,
+          fitAddon: null,
+          ws: null,
+          filePath: data.path
+        };
+
+        document.getElementById('welcome').style.display = 'none';
+        switchTab(id);
+        updateCount();
+        setStatus(`Opened ${data.name}`);
+
+        // Scroll to highlighted line
+        if (lineNumber) {
+          const highlightRow = container.querySelector('.file-viewer-highlight-line');
+          if (highlightRow) {
+            setTimeout(() => highlightRow.scrollIntoView({ block: 'center' }), 100);
+          }
+        }
+
+      } catch (err) {
+        setStatus('Failed to open file: ' + err.message);
+      }
+    }
+
+    function formatFileSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / 1048576).toFixed(1) + ' MB';
+    }
+
     function switchTab(id) {
       for (const [sid, s] of Object.entries(sessions)) {
         s.tab.classList.remove('active');
@@ -676,15 +1002,20 @@
         sessions[id].container.style.display = 'block';
         activeId = id;
         setTimeout(() => {
-          sessions[id].fitAddon.fit();
-          sessions[id].terminal.focus();
+          if (sessions[id] && sessions[id].terminal) {
+            sessions[id].fitAddon.fit();
+            sessions[id].terminal.focus();
+          }
         }, 50);
       }
     }
 
     async function closeTerminal(id) {
-      setStatus('Closing terminal...');
-      try { await authFetch(`/api/terminal/${id}`, { method: 'DELETE' }); } catch (err) {}
+      setStatus('Closing...');
+      // Skip server DELETE for file viewer tabs
+      if (!sessions[id] || sessions[id].type !== 'file') {
+        try { await authFetch(`/api/terminal/${id}`, { method: 'DELETE' }); } catch (err) {}
+      }
 
       if (sessions[id]) {
         // Clear any pending reconnect timer
@@ -692,7 +1023,7 @@
         // Mark as intentionally closing so ws.onclose won't show reconnect banner
         sessions[id]._closing = true;
         if (sessions[id].ws) sessions[id].ws.close();
-        sessions[id].terminal.dispose();
+        if (sessions[id].terminal) sessions[id].terminal.dispose();
         sessions[id].tab.remove();
         sessions[id].container.remove();
         delete sessions[id];
@@ -700,10 +1031,12 @@
 
       const remaining = Object.keys(sessions);
       if (remaining.length > 0) {
-        switchTab(parseInt(remaining[remaining.length - 1]));
-        // Hide reconnect banner if all remaining sessions are connected
+        const lastId = remaining[remaining.length - 1];
+        switchTab(parseInt(lastId) || lastId);
+        // Hide reconnect banner if all remaining terminal sessions are connected
         const anyDisconnected = remaining.some(sid => {
           const s = sessions[sid];
+          if (s.type === 'file') return false; // file viewers are never "disconnected"
           return !s.ws || s.ws.readyState !== WebSocket.OPEN;
         });
         if (!anyDisconnected) hideReconnectBanner();
@@ -735,7 +1068,7 @@
 
     // Re-fit all on window resize
     window.addEventListener('resize', () => {
-      if (activeId && sessions[activeId]) {
+      if (activeId && sessions[activeId] && sessions[activeId].fitAddon) {
         sessions[activeId].fitAddon.fit();
       }
     });
@@ -821,7 +1154,7 @@
       term.open(container);
       fitAddon.fit();
 
-      sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null };
+      sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null, cwd: '' };
       connectWs(id);
 
       term.onData((data) => {
@@ -870,6 +1203,7 @@
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
             s.terminal.write(msg.data);
+            scanOutputForLinks(msg.data);
           } else if (msg.type === 'exit') {
             s.terminal.write(`\r\n\x1b[31m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
           } else if (msg.type === 'error') {
@@ -922,6 +1256,7 @@
     function reconnectAll() {
       setStatus('Reconnecting...');
       for (const [id, s] of Object.entries(sessions)) {
+        if (s.type === 'file') continue; // skip file viewers
         if (s._reconnectTimer) clearTimeout(s._reconnectTimer);
         if (!s.ws || s.ws.readyState !== WebSocket.OPEN) {
           connectWs(parseInt(id));
@@ -936,6 +1271,7 @@
         setTimeout(() => {
           let anyDead = false;
           for (const [id, s] of Object.entries(sessions)) {
+            if (s.type === 'file') continue; // skip file viewers
             if (!s.ws || s.ws.readyState !== WebSocket.OPEN) {
               anyDead = true;
               connectWs(parseInt(id));
@@ -943,7 +1279,7 @@
           }
           if (!anyDead) hideReconnectBanner();
           // Re-fit active terminal
-          if (activeId && sessions[activeId]) {
+          if (activeId && sessions[activeId] && sessions[activeId].fitAddon) {
             sessions[activeId].fitAddon.fit();
           }
         }, 500);
