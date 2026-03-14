@@ -1,0 +1,17 @@
+{
+  "name": "web-terminal-hub",
+  "version": "1.0.0",
+  "description": "Web-based terminal hub with multi-tab support via ttyd + Cloudflare Tunnel",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "http-proxy": "^1.18.1",
+    "http-proxy-middleware": "^2.0.6",
+    "node-pty": "^1.1.0",
+    "playwright": "^1.58.2",
+    "ws": "^8.19.0"
+  }
+}

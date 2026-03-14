@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Terminal Hub - Login</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <div class="login-screen">
+      <div class="login-box">
+        <h1>Terminal Hub</h1>
+        <p class="login-subtitle">Enter password to access</p>
+        <form id="login-form">
+          <input
+            type="password"
+            id="password-input"
+            placeholder="Password"
+            autocomplete="current-password"
+            autofocus
+          >
+          <button type="submit" id="login-btn">Login</button>
+        </form>
+        <p id="login-error" class="login-error hidden"></p>
+        <p class="login-note">Only the latest login session has access.<br>Previous sessions will be disconnected.</p>
+      </div>
+    </div>
+  </div>
+  <script>
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = document.getElementById('password-input').value;
+      const errorEl = document.getElementById('login-error');
+      const btn = document.getElementById('login-btn');
+
+      btn.disabled = true;
+      btn.textContent = 'Logging in...';
+      errorEl.classList.add('hidden');
+
+      try {
+        const resp = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password })
+        });
+        const data = await resp.json();
+
+        if (data.ok) {
+          window.location.href = '/';
+        } else {
+          errorEl.textContent = data.error || 'Login failed';
+          errorEl.classList.remove('hidden');
+        }
+      } catch (err) {
+        errorEl.textContent = 'Connection error';
+        errorEl.classList.remove('hidden');
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Login';
+    });
+  </script>
+</body>
+</html>

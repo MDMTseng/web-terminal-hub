@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Terminal Hub</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- Top bar with tabs -->
+    <div id="topbar">
+      <div id="tabs-container">
+        <div id="tabs"></div>
+        <button id="new-tab-btn" title="New Terminal">+</button>
+      </div>
+    </div>
+
+    <!-- Terminal area -->
+    <div id="terminal-area">
+      <div id="welcome" class="welcome-screen">
+        <h1>Terminal Hub</h1>
+        <p>Open a terminal session</p>
+        <div class="quick-launch">
+          <button onclick="pickShell('bash')">
+            <span class="ql-icon">$</span>
+            <span>Bash</span>
+          </button>
+          <button onclick="pickShell('powershell.exe')">
+            <span class="ql-icon">PS</span>
+            <span>PowerShell</span>
+          </button>
+          <button onclick="pickShell('cmd.exe')">
+            <span class="ql-icon">&gt;</span>
+            <span>CMD</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Virtual keyboard for mobile -->
+    <div id="vkeyboard">
+      <!-- Compact bar (always visible) -->
+      <div class="vk-row vk-compact-bar" id="vk-compact">
+        <button class="vk-key vk-action" data-key="Tab">Tab</button>
+        <button class="vk-key vk-action" data-key="ArrowUp">▲</button>
+        <button class="vk-key vk-action" data-key="ArrowDown">▼</button>
+        <button class="vk-key vk-action" data-key="ArrowLeft">◀</button>
+        <button class="vk-key vk-action" data-key="ArrowRight">▶</button>
+        <button class="vk-key vk-danger" data-combo="ctrl+c">^C</button>
+        <button class="vk-key vk-action" data-key="Escape">Esc</button>
+        <button class="vk-key vk-zoom-btn" id="vk-zoom-btn" title="Zoom">A</button>
+        <button class="vk-key vk-expand-btn" id="vk-expand-btn">···</button>
+      </div>
+      <!-- Expanded rows (hidden by default) -->
+      <div id="vk-expanded" class="vk-expanded hidden">
+        <!-- Row 1: modifier toggles -->
+        <div class="vk-row vk-modifiers">
+          <button class="vk-key vk-toggle" data-mod="ctrl" id="vk-ctrl">Ctrl</button>
+          <button class="vk-key vk-toggle" data-mod="alt" id="vk-alt">Alt</button>
+          <button class="vk-key vk-toggle" data-mod="shift" id="vk-shift">Shift</button>
+          <button class="vk-key vk-action" data-key="Escape">Esc</button>
+        </div>
+        <!-- Row 2: arrows -->
+        <div class="vk-row">
+          <button class="vk-key vk-action" data-key="ArrowUp">▲</button>
+          <button class="vk-key vk-action" data-key="ArrowDown">▼</button>
+          <button class="vk-key vk-action" data-key="Home">Home</button>
+          <button class="vk-key vk-action" data-key="End">End</button>
+        </div>
+        <!-- Row 3: signals + editing -->
+        <div class="vk-row">
+          <button class="vk-key vk-warn" data-combo="ctrl+d">^D</button>
+          <button class="vk-key vk-warn" data-combo="ctrl+z">^Z</button>
+          <button class="vk-key vk-action" data-combo="ctrl+l">Clear</button>
+          <button class="vk-key vk-action" data-combo="ctrl+a">^A</button>
+          <button class="vk-key vk-action" data-combo="ctrl+e">^E</button>
+        </div>
+        <!-- Row 4: pipe, redirect, special -->
+        <div class="vk-row">
+          <button class="vk-key vk-action" data-combo="ctrl+r">^R</button>
+          <button class="vk-key vk-action" data-char="|">|</button>
+          <button class="vk-key vk-action" data-char="&">&amp;</button>
+          <button class="vk-key vk-action" data-char=">">&gt;</button>
+          <button class="vk-key vk-action" data-char="<">&lt;</button>
+          <button class="vk-key vk-action" data-char="~">~</button>
+          <button class="vk-key vk-action" data-char="/">/</button>
+        </div>
+        <!-- Row 5: symbols -->
+        <div class="vk-row">
+          <button class="vk-key vk-action" data-char="-">-</button>
+          <button class="vk-key vk-action" data-char="_">_</button>
+          <button class="vk-key vk-action" data-char=".">.</button>
+          <button class="vk-key vk-action" data-char="*">*</button>
+          <button class="vk-key vk-action" data-char="$">$</button>
+          <button class="vk-key vk-action" data-char="(">(</button>
+          <button class="vk-key vk-action" data-char=")">)</button>
+          <button class="vk-key vk-action" data-char=";">;</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status bar -->
+    <div id="statusbar">
+      <span id="group-badge"></span>
+      <span id="status-text">Ready</span>
+      <button id="vk-toggle-btn" title="Toggle virtual keyboard">⌨</button>
+      <button id="switch-group-btn" title="Switch group">⇄ Groups</button>
+      <span id="terminal-count">0 terminals</span>
+    </div>
+
+    <!-- Shell picker modal -->
+    <div id="shell-modal" class="modal hidden">
+      <div class="modal-backdrop" onclick="closeShellModal()"></div>
+      <div class="modal-content">
+        <h3>New Terminal</h3>
+        <button class="modal-shell-btn" onclick="pickShell('bash')">
+          <span class="ql-icon">$</span> Bash
+        </button>
+        <button class="modal-shell-btn" onclick="pickShell('powershell.exe')">
+          <span class="ql-icon">PS</span> PowerShell
+        </button>
+        <button class="modal-shell-btn" onclick="pickShell('cmd.exe')">
+          <span class="ql-icon">&gt;</span> CMD
+        </button>
+      </div>
+    </div>
+
+    <!-- Directory browser modal -->
+    <div id="dir-modal" class="modal hidden">
+      <div class="modal-backdrop" onclick="closeDirModal()"></div>
+      <div class="modal-content dir-modal-content">
+        <div class="dir-modal-header">
+          <h3>Choose Starting Directory</h3>
+          <input type="text" id="dir-path-input" class="form-input dir-path-input" placeholder="Type or paste a path..." />
+        </div>
+        <div id="dir-recent" class="dir-recent hidden"></div>
+        <div id="dir-breadcrumb" class="dir-breadcrumb"></div>
+        <div id="dir-entry-list" class="dir-entry-list"></div>
+        <div id="dir-error" class="dir-error hidden"></div>
+        <div class="dir-modal-footer">
+          <button class="form-btn form-btn-save" onclick="confirmDirectory()">Use This Directory</button>
+          <button class="form-btn form-btn-cancel" onclick="useHomeDirectory()">Home Dir</button>
+          <button class="form-btn form-btn-cancel" onclick="closeDirModal()">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const sessions = {};
+    let activeId = null;
+    const modifiers = { ctrl: false, alt: false, shift: false };
+
+    // ---- Auth helpers ----
+    function getToken() {
+      const match = document.cookie.match(/(?:^|;\s*)token=([^;]*)/);
+      return match ? match[1] : null;
+    }
+
+    function getWsUrl() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${proto}//${location.host}/ws`;
+    }
+
+    function handleKicked(msg) {
+      alert('Session expired: ' + (msg || 'Another device logged in to this group.'));
+      window.location.href = '/welcome';
+    }
+
+    // Check API response for 401
+    async function authFetch(url, opts) {
+      const resp = await fetch(url, opts);
+      if (resp.status === 401) {
+        window.location.href = '/welcome';
+        throw new Error('Unauthorized');
+      }
+      return resp;
+    }
+
+    // ---- Shell modal ----
+    function openShellModal() {
+      document.getElementById('shell-modal').classList.remove('hidden');
+    }
+    function closeShellModal() {
+      document.getElementById('shell-modal').classList.add('hidden');
+    }
+
+    // ---- Recent directories (localStorage) ----
+    const RECENT_DIRS_KEY = 'termhub_recent_dirs';
+    const RECENT_DIRS_MAX = 8;
+
+    function getRecentDirs() {
+      try {
+        return JSON.parse(localStorage.getItem(RECENT_DIRS_KEY)) || [];
+      } catch (_) { return []; }
+    }
+
+    function saveRecentDir(dirPath) {
+      if (!dirPath) return;
+      let dirs = getRecentDirs();
+      // Remove duplicate (case-insensitive on Windows)
+      dirs = dirs.filter(d => d.toLowerCase() !== dirPath.toLowerCase());
+      dirs.unshift(dirPath); // most recent first
+      if (dirs.length > RECENT_DIRS_MAX) dirs = dirs.slice(0, RECENT_DIRS_MAX);
+      localStorage.setItem(RECENT_DIRS_KEY, JSON.stringify(dirs));
+    }
+
+    function removeRecentDir(dirPath) {
+      let dirs = getRecentDirs();
+      dirs = dirs.filter(d => d.toLowerCase() !== dirPath.toLowerCase());
+      localStorage.setItem(RECENT_DIRS_KEY, JSON.stringify(dirs));
+    }
+
+    function renderRecentDirs() {
+      const container = document.getElementById('dir-recent');
+      const dirs = getRecentDirs();
+      if (dirs.length === 0) {
+        container.classList.add('hidden');
+        return;
+      }
+      container.classList.remove('hidden');
+      container.innerHTML = '<div class="dir-recent-title">Recent</div>';
+      const list = document.createElement('div');
+      list.className = 'dir-recent-list';
+      for (const dir of dirs) {
+        const row = document.createElement('div');
+        row.className = 'dir-recent-row';
+        const lastSeg = dir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || dir;
+        row.innerHTML = `<span class="dir-recent-icon">&#x1F552;</span><span class="dir-recent-name" title="${escapeHtml(dir)}">${escapeHtml(lastSeg)}</span><span class="dir-recent-path">${escapeHtml(dir)}</span><button class="dir-recent-remove" title="Remove">&times;</button>`;
+        row.querySelector('.dir-recent-remove').addEventListener('click', (e) => {
+          e.stopPropagation();
+          removeRecentDir(dir);
+          renderRecentDirs();
+        });
+        row.addEventListener('click', () => {
+          browseDirectory(dir);
+        });
+        list.appendChild(row);
+      }
+      container.appendChild(list);
+    }
+
+    // ---- Directory browser ----
+    let pendingShell = null;
+    let currentBrowsePath = '';
+    let dirInputTimer = null;
+    let cachedDrives = null;
+
+    function pickShell(shell) {
+      pendingShell = shell;
+      closeShellModal();
+      openDirModal();
+    }
+
+    function openDirModal() {
+      document.getElementById('dir-modal').classList.remove('hidden');
+      renderRecentDirs();
+      browseDirectory(''); // empty = server defaults to HOME
+    }
+
+    function closeDirModal() {
+      document.getElementById('dir-modal').classList.add('hidden');
+      pendingShell = null;
+      currentBrowsePath = '';
+    }
+
+    async function browseDirectory(dirPath) {
+      const listEl = document.getElementById('dir-entry-list');
+      const errorEl = document.getElementById('dir-error');
+      errorEl.classList.add('hidden');
+      listEl.innerHTML = '<div class="dir-loading">Loading...</div>';
+
+      try {
+        const url = '/api/fs/browse' + (dirPath ? '?path=' + encodeURIComponent(dirPath) : '');
+        const resp = await authFetch(url);
+        const data = await resp.json();
+
+        if (data.error) {
+          errorEl.textContent = data.error;
+          errorEl.classList.remove('hidden');
+          listEl.innerHTML = '';
+          return;
+        }
+
+        currentBrowsePath = data.path;
+        document.getElementById('dir-path-input').value = data.path;
+        renderBreadcrumb(data.path, data.separator);
+        renderBrowserEntries(data.entries, data.parent, data.path, data.separator);
+      } catch (err) {
+        errorEl.textContent = 'Failed to browse: ' + err.message;
+        errorEl.classList.remove('hidden');
+        listEl.innerHTML = '';
+      }
+    }
+
+    function renderBreadcrumb(fullPath, sep) {
+      const bc = document.getElementById('dir-breadcrumb');
+      bc.innerHTML = '';
+
+      // Split path into segments
+      const parts = fullPath.split(/[\\/]/).filter(Boolean);
+
+      // On Windows, first part is drive like "C:"
+      let accumulated = '';
+      parts.forEach((part, i) => {
+        if (i > 0) {
+          const sepEl = document.createElement('span');
+          sepEl.className = 'dir-breadcrumb-sep';
+          sepEl.textContent = sep;
+          bc.appendChild(sepEl);
+        }
+
+        accumulated += (i === 0 ? '' : sep) + part;
+        const segPath = i === 0 ? part + sep : accumulated;
+
+        const btn = document.createElement('button');
+        btn.className = 'dir-breadcrumb-seg';
+        btn.textContent = part;
+        btn.addEventListener('click', () => browseDirectory(segPath));
+        bc.appendChild(btn);
+      });
+
+      // Auto-scroll breadcrumb to end
+      bc.scrollLeft = bc.scrollWidth;
+    }
+
+    async function renderBrowserEntries(entries, parent, currentPath, sep) {
+      const listEl = document.getElementById('dir-entry-list');
+      const frag = document.createDocumentFragment();
+
+      // If at drive root (no parent), show drives list
+      if (parent === null) {
+        await renderDrivesList(frag);
+      } else {
+        // ".." row to go up
+        const upRow = document.createElement('div');
+        upRow.className = 'dir-entry-row dir-up-row';
+        upRow.innerHTML = '<span class="dir-entry-icon">&#x2B06;</span><span class="dir-entry-name">..</span>';
+        upRow.addEventListener('click', () => browseDirectory(parent));
+        frag.appendChild(upRow);
+      }
+
+      const trailing = currentPath.endsWith(sep) ? '' : sep;
+      for (const entry of entries) {
+        const row = document.createElement('div');
+        row.className = 'dir-entry-row' + (entry.type === 'file' ? ' is-file' : '');
+
+        const icon = entry.type === 'dir' ? '&#x1F4C1;' : '&#x1F4C4;';
+        row.innerHTML = `<span class="dir-entry-icon">${icon}</span><span class="dir-entry-name">${escapeHtml(entry.name)}</span>`;
+
+        if (entry.type === 'dir') {
+          row.addEventListener('click', () => {
+            browseDirectory(currentPath + trailing + entry.name);
+          });
+        }
+
+        frag.appendChild(row);
+      }
+
+      listEl.innerHTML = '';
+      listEl.appendChild(frag);
+    }
+
+    async function renderDrivesList(listEl) {
+      if (!cachedDrives) {
+        try {
+          const resp = await authFetch('/api/fs/drives');
+          const data = await resp.json();
+          cachedDrives = data.drives || [];
+        } catch (_) {
+          cachedDrives = [];
+        }
+      }
+
+      if (cachedDrives.length > 0) {
+        const drivesRow = document.createElement('div');
+        drivesRow.className = 'dir-drives-row';
+        for (const drive of cachedDrives) {
+          const btn = document.createElement('button');
+          btn.className = 'dir-drive-btn';
+          btn.textContent = drive;
+          btn.addEventListener('click', () => browseDirectory(drive));
+          drivesRow.appendChild(btn);
+        }
+        listEl.appendChild(drivesRow);
+      }
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function confirmDirectory() {
+      const shell = pendingShell;
+      const cwd = currentBrowsePath || '';
+      if (cwd) saveRecentDir(cwd);
+      closeDirModal();
+      createTerminal(shell, cwd);
+    }
+
+    function useHomeDirectory() {
+      const shell = pendingShell;
+      closeDirModal();
+      createTerminal(shell, '');
+    }
+
+    // Debounced path input
+    document.getElementById('dir-path-input').addEventListener('input', (e) => {
+      clearTimeout(dirInputTimer);
+      dirInputTimer = setTimeout(() => {
+        const val = e.target.value.trim();
+        if (val) browseDirectory(val);
+      }, 400);
+    });
+
+    // ---- Virtual keyboard ----
+    function sendKey(key) {
+      if (!activeId || !sessions[activeId]) return;
+      const s = sessions[activeId];
+      if (s.ws.readyState !== WebSocket.OPEN) return;
+      s.ws.send(JSON.stringify({ type: 'input', data: key }));
+      s.terminal.focus();
+    }
+
+    function getEscapeSequence(key) {
+      const map = {
+        'ArrowUp': '\x1b[A',
+        'ArrowDown': '\x1b[B',
+        'ArrowRight': '\x1b[C',
+        'ArrowLeft': '\x1b[D',
+        'Home': '\x1b[H',
+        'End': '\x1b[F',
+        'Tab': '\t',
+        'Escape': '\x1b',
+        'Delete': '\x1b[3~',
+        'PageUp': '\x1b[5~',
+        'PageDown': '\x1b[6~',
+      };
+      return map[key] || null;
+    }
+
+    function ctrlKey(letter) {
+      return String.fromCharCode(letter.toUpperCase().charCodeAt(0) - 64);
+    }
+
+    // Virtual keyboard button handler
+    document.getElementById('vkeyboard').addEventListener('click', (e) => {
+      const btn = e.target.closest('.vk-key');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Toggle modifier
+      if (btn.classList.contains('vk-toggle')) {
+        const mod = btn.dataset.mod;
+        modifiers[mod] = !modifiers[mod];
+        btn.classList.toggle('vk-active', modifiers[mod]);
+        return;
+      }
+
+      // Combo (ctrl+c etc.)
+      if (btn.dataset.combo) {
+        const parts = btn.dataset.combo.split('+');
+        const letter = parts[parts.length - 1];
+        sendKey(ctrlKey(letter));
+        resetModifiers();
+        return;
+      }
+
+      // Special key (arrows, tab, esc)
+      if (btn.dataset.key) {
+        let seq = getEscapeSequence(btn.dataset.key);
+        if (seq) {
+          if (modifiers.shift && btn.dataset.key.startsWith('Arrow')) {
+            // Shift+Arrow for selection in some apps
+            seq = seq.replace('[', '[1;2');
+          }
+          sendKey(seq);
+          resetModifiers();
+          return;
+        }
+      }
+
+      // Character key
+      if (btn.dataset.char) {
+        let ch = btn.dataset.char;
+        if (modifiers.ctrl) {
+          sendKey(ctrlKey(ch));
+        } else {
+          sendKey(ch);
+        }
+        resetModifiers();
+        return;
+      }
+    });
+
+    // Prevent long-press context menu on virtual keyboard
+    document.getElementById('vkeyboard').addEventListener('contextmenu', (e) => e.preventDefault());
+
+    function resetModifiers() {
+      modifiers.ctrl = false;
+      modifiers.alt = false;
+      modifiers.shift = false;
+      document.querySelectorAll('.vk-toggle').forEach(b => b.classList.remove('vk-active'));
+    }
+
+    // Toggle virtual keyboard visibility (whole bar)
+    let vkVisible = true;
+    document.getElementById('vk-toggle-btn').addEventListener('click', () => {
+      vkVisible = !vkVisible;
+      document.getElementById('vkeyboard').style.display = vkVisible ? 'flex' : 'none';
+      if (activeId && sessions[activeId]) {
+        setTimeout(() => sessions[activeId].fitAddon.fit(), 100);
+      }
+    });
+
+    // Expand/collapse extra rows
+    let vkExpanded = false;
+    document.getElementById('vk-expand-btn').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      vkExpanded = !vkExpanded;
+      document.getElementById('vk-expanded').classList.toggle('hidden', !vkExpanded);
+      document.getElementById('vk-expand-btn').textContent = vkExpanded ? '▾' : '···';
+      document.getElementById('vk-expand-btn').classList.toggle('vk-active', vkExpanded);
+      if (activeId && sessions[activeId]) {
+        setTimeout(() => sessions[activeId].fitAddon.fit(), 100);
+      }
+    });
+
+    // ---- Zoom: cycle font sizes ----
+    const ZOOM_LEVELS = [
+      { size: 9,  label: 'A⁻' },
+      { size: 11, label: 'A'  },
+      { size: 13, label: 'A⁺' },
+      { size: 16, label: 'A⁺⁺' },
+    ];
+    // Default: small on mobile, medium on desktop
+    let zoomIndex = window.innerWidth < 768 ? 0 : 1;
+
+    function applyZoom() {
+      const level = ZOOM_LEVELS[zoomIndex];
+      document.getElementById('vk-zoom-btn').textContent = level.label;
+      // Apply to all terminals
+      for (const [id, s] of Object.entries(sessions)) {
+        s.terminal.options.fontSize = level.size;
+        s.fitAddon.fit();
+      }
+    }
+
+    document.getElementById('vk-zoom-btn').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      zoomIndex = (zoomIndex + 1) % ZOOM_LEVELS.length;
+      applyZoom();
+    });
+
+    // Initialize zoom label
+    document.getElementById('vk-zoom-btn').textContent = ZOOM_LEVELS[zoomIndex].label;
+
+    // ---- Terminal management ----
+
+    async function createTerminal(shell, cwd) {
+      if (!shell) shell = 'bash';
+      setStatus('Starting terminal...');
+
+      const body = { shell, cols: 80, rows: 24 };
+      if (cwd) body.cwd = cwd;
+
+      try {
+        const resp = await authFetch('/api/terminal/new', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+
+        const id = data.id;
+
+        // Build tab label — append last dir segment if custom cwd
+        let tabLabel = `${getShellName(shell)} #${id}`;
+        if (cwd) {
+          const lastSeg = cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+          if (lastSeg) tabLabel += ` \u00B7 ${lastSeg}`;
+        }
+
+        // Create tab
+        const tabEl = document.createElement('div');
+        tabEl.className = 'tab';
+        tabEl.dataset.id = id;
+        tabEl.innerHTML = `
+          <span class="tab-icon">${getShellIcon(shell)}</span>
+          <span class="tab-label">${tabLabel}</span>
+          <button class="tab-close" title="Close">&times;</button>
+        `;
+        tabEl.addEventListener('click', (e) => {
+          if (!e.target.classList.contains('tab-close')) switchTab(id);
+        });
+        tabEl.querySelector('.tab-close').addEventListener('click', (e) => {
+          e.stopPropagation();
+          closeTerminal(id);
+        });
+        document.getElementById('tabs').appendChild(tabEl);
+
+        // Create terminal container
+        const container = document.createElement('div');
+        container.className = 'terminal-container';
+        container.dataset.id = id;
+        document.getElementById('terminal-area').appendChild(container);
+
+        // Create xterm.js — use current zoom level
+        const term = new Terminal({
+          cursorBlink: true,
+          fontSize: ZOOM_LEVELS[zoomIndex].size,
+          fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
+          theme: {
+            background: '#0a192f',
+            foreground: '#d2d2d2',
+            cursor: '#64ffda',
+            selectionBackground: '#1f4068'
+          },
+          allowProposedApi: true,
+          scrollback: 5000
+        });
+
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        try {
+          const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+          term.loadAddon(webLinksAddon);
+        } catch(e) {}
+
+        term.open(container);
+        fitAddon.fit();
+
+        // WebSocket (include token for auth)
+        const token = getToken();
+        const ws = new WebSocket(`${getWsUrl()}?id=${id}&token=${token}`);
+
+        ws.onopen = () => {
+          setStatus(`Terminal #${id} connected`);
+          const dims = fitAddon.proposeDimensions();
+          if (dims) {
+            ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
+          }
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'output') {
+              term.write(msg.data);
+            } else if (msg.type === 'exit') {
+              term.write(`\r\n\x1b[31m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
+            } else if (msg.type === 'error') {
+              term.write(`\r\n\x1b[31m[Error: ${msg.message}]\x1b[0m\r\n`);
+            } else if (msg.type === 'kicked') {
+              handleKicked(msg.message);
+            }
+          } catch (err) {
+            term.write(event.data);
+          }
+        };
+
+        ws.onclose = () => {
+          term.write('\r\n\x1b[33m[Disconnected]\x1b[0m\r\n');
+        };
+
+        ws.onerror = () => {};
+
+        term.onData((data) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'input', data }));
+          }
+        });
+
+        term.onResize(({ cols, rows }) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+          }
+        });
+
+        sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws };
+        document.getElementById('welcome').style.display = 'none';
+        switchTab(id);
+        updateCount();
+
+      } catch (err) {
+        setStatus('Error: ' + err.message);
+      }
+    }
+
+    function switchTab(id) {
+      for (const [sid, s] of Object.entries(sessions)) {
+        s.tab.classList.remove('active');
+        s.container.style.display = 'none';
+      }
+      if (sessions[id]) {
+        sessions[id].tab.classList.add('active');
+        sessions[id].container.style.display = 'block';
+        activeId = id;
+        setTimeout(() => {
+          sessions[id].fitAddon.fit();
+          sessions[id].terminal.focus();
+        }, 50);
+      }
+    }
+
+    async function closeTerminal(id) {
+      setStatus('Closing terminal...');
+      try { await authFetch(`/api/terminal/${id}`, { method: 'DELETE' }); } catch (err) {}
+
+      if (sessions[id]) {
+        if (sessions[id].ws) sessions[id].ws.close();
+        sessions[id].terminal.dispose();
+        sessions[id].tab.remove();
+        sessions[id].container.remove();
+        delete sessions[id];
+      }
+
+      const remaining = Object.keys(sessions);
+      if (remaining.length > 0) {
+        switchTab(parseInt(remaining[remaining.length - 1]));
+      } else {
+        activeId = null;
+        document.getElementById('welcome').style.display = 'flex';
+      }
+      updateCount();
+      setStatus('Terminal closed');
+    }
+
+    function getShellIcon(s) {
+      if (s.includes('powershell') || s.includes('pwsh')) return 'PS';
+      if (s.includes('cmd')) return '>';
+      return '$';
+    }
+    function getShellName(s) {
+      if (s.includes('powershell')) return 'PS';
+      if (s.includes('pwsh')) return 'pwsh';
+      if (s.includes('cmd')) return 'CMD';
+      return 'Bash';
+    }
+    function setStatus(t) { document.getElementById('status-text').textContent = t; }
+    function updateCount() {
+      const c = Object.keys(sessions).length;
+      document.getElementById('terminal-count').textContent = c === 1 ? '1 term' : `${c} terms`;
+    }
+
+    // Re-fit all on window resize
+    window.addEventListener('resize', () => {
+      if (activeId && sessions[activeId]) {
+        sessions[activeId].fitAddon.fit();
+      }
+    });
+
+    // + button opens shell picker
+    document.getElementById('new-tab-btn').addEventListener('click', openShellModal);
+
+    // Desktop shortcut
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+        e.preventDefault();
+        openShellModal();
+      }
+    });
+
+    // ---- Reconnect to existing terminals on page load ----
+    async function reconnectExisting() {
+      try {
+        const resp = await authFetch('/api/terminals');
+        const list = await resp.json();
+
+        if (list.length === 0) return;
+
+        setStatus(`Reconnecting to ${list.length} terminal(s)...`);
+        document.getElementById('welcome').style.display = 'none';
+
+        for (const t of list) {
+          await attachToTerminal(t.id, t.shell);
+        }
+
+        updateCount();
+        setStatus('Reconnected');
+      } catch (err) {
+        console.error('Reconnect failed:', err);
+      }
+    }
+
+    // Attach to an existing server-side terminal (no new pty, just WS + UI)
+    async function attachToTerminal(id, shell) {
+      const tabEl = document.createElement('div');
+      tabEl.className = 'tab';
+      tabEl.dataset.id = id;
+      tabEl.innerHTML = `
+        <span class="tab-icon">${getShellIcon(shell)}</span>
+        <span class="tab-label">${getShellName(shell)} #${id}</span>
+        <button class="tab-close" title="Close">&times;</button>
+      `;
+      tabEl.addEventListener('click', (e) => {
+        if (!e.target.classList.contains('tab-close')) switchTab(id);
+      });
+      tabEl.querySelector('.tab-close').addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeTerminal(id);
+      });
+      document.getElementById('tabs').appendChild(tabEl);
+
+      const container = document.createElement('div');
+      container.className = 'terminal-container';
+      container.dataset.id = id;
+      document.getElementById('terminal-area').appendChild(container);
+
+      const term = new Terminal({
+        cursorBlink: true,
+        fontSize: ZOOM_LEVELS[zoomIndex].size,
+        fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
+        theme: {
+          background: '#0a192f',
+          foreground: '#d2d2d2',
+          cursor: '#64ffda',
+          selectionBackground: '#1f4068'
+        },
+        allowProposedApi: true,
+        scrollback: 5000
+      });
+
+      const fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      try {
+        const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+        term.loadAddon(webLinksAddon);
+      } catch(e) {}
+
+      term.open(container);
+      fitAddon.fit();
+
+      const token = getToken();
+      const ws = new WebSocket(`${getWsUrl()}?id=${id}&token=${token}`);
+
+      ws.onopen = () => {
+        setStatus(`Reconnected to #${id}`);
+        const dims = fitAddon.proposeDimensions();
+        if (dims) {
+          ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
+        }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'output') {
+            term.write(msg.data);
+          } else if (msg.type === 'exit') {
+            term.write(`\r\n\x1b[31m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
+          } else if (msg.type === 'error') {
+            term.write(`\r\n\x1b[31m[Error: ${msg.message}]\x1b[0m\r\n`);
+          } else if (msg.type === 'kicked') {
+            handleKicked(msg.message);
+          }
+        } catch (err) {
+          term.write(event.data);
+        }
+      };
+
+      ws.onclose = () => {
+        term.write('\r\n\x1b[33m[Disconnected]\x1b[0m\r\n');
+      };
+
+      ws.onerror = () => {};
+
+      term.onData((data) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'input', data }));
+        }
+      });
+
+      term.onResize(({ cols, rows }) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        }
+      });
+
+      sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws };
+      switchTab(id);
+    }
+
+    // Load group info and display in status bar
+    async function loadGroupInfo() {
+      try {
+        const resp = await authFetch('/api/group-info');
+        const info = await resp.json();
+        const badge = document.getElementById('group-badge');
+        badge.textContent = `${info.icon} ${info.name}`;
+        badge.style.color = info.color;
+        document.title = `Terminal Hub - ${info.name}`;
+      } catch (err) {
+        console.error('Failed to load group info:', err);
+      }
+    }
+
+    // Switch group button
+    document.getElementById('switch-group-btn').addEventListener('click', () => {
+      window.location.href = '/welcome';
+    });
+
+    // ---- Mobile keyboard: keep virtual keyboard visible above phone keyboard ----
+    function handleViewportResize() {
+      const vv = window.visualViewport;
+      if (!vv) return;
+
+      const app = document.getElementById('app');
+      // Position #app to match the visible viewport exactly
+      app.style.top = vv.offsetTop + 'px';
+      app.style.height = vv.height + 'px';
+
+      // Re-fit active terminal to the new visible area
+      if (activeId && sessions[activeId]) {
+        setTimeout(() => sessions[activeId].fitAddon.fit(), 50);
+      }
+    }
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleViewportResize);
+      window.visualViewport.addEventListener('scroll', handleViewportResize);
+    }
+
+    // Auto-reconnect on page load
+    loadGroupInfo();
+    reconnectExisting();
+  </script>
+</body>
+</html>

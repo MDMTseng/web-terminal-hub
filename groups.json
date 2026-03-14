@@ -1,0 +1,28 @@
+{
+  "groups": [
+    {
+      "name": "Dev",
+      "icon": "🛠",
+      "color": "#64ffda",
+      "maxTerminals": 10
+    },
+    {
+      "name": "Ops",
+      "icon": "🖥",
+      "color": "#f78c6c",
+      "maxTerminals": 10
+    },
+    {
+      "name": "Debug",
+      "icon": "🐛",
+      "color": "#c792ea",
+      "maxTerminals": 5
+    },
+    {
+      "name": "Sandbox",
+      "icon": "📦",
+      "color": "#ffcb6b",
+      "maxTerminals": 5
+    }
+  ]
+}

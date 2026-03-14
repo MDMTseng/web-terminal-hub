@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Terminal Hub</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <div class="welcome-hub">
+      <div class="welcome-header">
+        <h1>Terminal Hub</h1>
+        <p class="welcome-subtitle">Choose a workspace to start</p>
+        <button id="edit-mode-btn" class="edit-mode-btn" onclick="toggleEditMode()">✏️ Edit</button>
+      </div>
+
+      <div id="groups-grid" class="groups-grid">
+        <div class="loading-state">Loading groups...</div>
+      </div>
+
+      <div class="welcome-footer">
+        <p>Each workspace is isolated. Entering a workspace kicks the previous session in that workspace only.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add/Edit Group Modal -->
+  <div id="group-modal" class="modal hidden">
+    <div class="modal-backdrop" onclick="closeModal()"></div>
+    <div class="modal-content group-modal-content">
+      <h3 id="modal-title">New Group</h3>
+      <form id="group-form" onsubmit="submitGroupForm(event)">
+        <input type="hidden" id="form-original-name" value="">
+
+        <label class="form-label">Name</label>
+        <input type="text" id="form-name" class="form-input" placeholder="e.g. Dev, Staging, Prod" required maxlength="20" autocomplete="off">
+
+        <label class="form-label">Icon (emoji)</label>
+        <div class="icon-picker">
+          <input type="text" id="form-icon" class="form-input form-icon-input" value="🖥" maxlength="4">
+          <div class="icon-presets">
+            <button type="button" onclick="pickIcon('🛠')">🛠</button>
+            <button type="button" onclick="pickIcon('🖥')">🖥</button>
+            <button type="button" onclick="pickIcon('🐛')">🐛</button>
+            <button type="button" onclick="pickIcon('📦')">📦</button>
+            <button type="button" onclick="pickIcon('🚀')">🚀</button>
+            <button type="button" onclick="pickIcon('🧪')">🧪</button>
+            <button type="button" onclick="pickIcon('⚡')">⚡</button>
+            <button type="button" onclick="pickIcon('🔧')">🔧</button>
+            <button type="button" onclick="pickIcon('🌐')">🌐</button>
+            <button type="button" onclick="pickIcon('💻')">💻</button>
+            <button type="button" onclick="pickIcon('🎯')">🎯</button>
+            <button type="button" onclick="pickIcon('🔒')">🔒</button>
+          </div>
+        </div>
+
+        <label class="form-label">Color</label>
+        <div class="color-picker">
+          <input type="color" id="form-color" class="form-color-input" value="#64ffda">
+          <div class="color-presets">
+            <button type="button" class="color-dot" style="background:#64ffda" onclick="pickColor('#64ffda')"></button>
+            <button type="button" class="color-dot" style="background:#f78c6c" onclick="pickColor('#f78c6c')"></button>
+            <button type="button" class="color-dot" style="background:#c792ea" onclick="pickColor('#c792ea')"></button>
+            <button type="button" class="color-dot" style="background:#ffcb6b" onclick="pickColor('#ffcb6b')"></button>
+            <button type="button" class="color-dot" style="background:#82aaff" onclick="pickColor('#82aaff')"></button>
+            <button type="button" class="color-dot" style="background:#c3e88d" onclick="pickColor('#c3e88d')"></button>
+            <button type="button" class="color-dot" style="background:#ff5370" onclick="pickColor('#ff5370')"></button>
+            <button type="button" class="color-dot" style="background:#89ddff" onclick="pickColor('#89ddff')"></button>
+          </div>
+        </div>
+
+        <label class="form-label">Max Terminals</label>
+        <input type="number" id="form-max" class="form-input" value="10" min="1" max="50">
+
+        <div class="form-actions">
+          <button type="button" class="form-btn form-btn-cancel" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="form-btn form-btn-save" id="form-save-btn">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Delete Confirm Modal -->
+  <div id="delete-modal" class="modal hidden">
+    <div class="modal-backdrop" onclick="closeDeleteModal()"></div>
+    <div class="modal-content group-modal-content">
+      <h3>Delete Group</h3>
+      <p class="delete-warning">Are you sure you want to delete <strong id="delete-group-name"></strong>?</p>
+      <p class="delete-note">All terminals in this group will be killed.</p>
+      <div class="form-actions">
+        <button class="form-btn form-btn-cancel" onclick="closeDeleteModal()">Cancel</button>
+        <button class="form-btn form-btn-delete" id="confirm-delete-btn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let editMode = false;
+    let refreshInterval = null;
+
+    function toggleEditMode() {
+      editMode = !editMode;
+      const btn = document.getElementById('edit-mode-btn');
+      btn.textContent = editMode ? '✅ Done' : '✏️ Edit';
+      btn.classList.toggle('edit-mode-active', editMode);
+      loadGroups();
+      // Pause auto-refresh while editing
+      if (editMode) {
+        clearInterval(refreshInterval);
+        refreshInterval = null;
+      } else {
+        refreshInterval = setInterval(loadGroups, 5000);
+      }
+    }
+
+    async function loadGroups() {
+      try {
+        const resp = await fetch('/api/groups');
+        const groups = await resp.json();
+        const grid = document.getElementById('groups-grid');
+        grid.innerHTML = '';
+
+        if (groups.length === 0 && !editMode) {
+          grid.innerHTML = '<p class="no-groups">No groups yet. Click ✏️ Edit to add one!</p>';
+        }
+
+        groups.forEach(g => {
+          const card = document.createElement('div');
+          card.className = 'group-card' + (editMode ? ' edit-mode' : '');
+          card.style.setProperty('--group-color', g.color);
+
+          const statusClass = g.connectedClients > 0 ? 'status-active' : g.activeTerminals > 0 ? 'status-idle' : 'status-empty';
+          const statusText = g.connectedClients > 0
+            ? `${g.connectedClients} connected`
+            : g.activeTerminals > 0
+              ? `${g.activeTerminals} terminal${g.activeTerminals > 1 ? 's' : ''} (idle)`
+              : 'No active terminals';
+
+          if (editMode) {
+            card.innerHTML = `
+              <div class="card-edit-actions">
+                <button class="card-edit-btn" onclick="event.stopPropagation(); openEditModal('${escapeHtml(g.name)}', '${escapeHtml(g.icon)}', '${escapeHtml(g.color)}', ${g.maxTerminals})" title="Edit">✏️</button>
+                <button class="card-delete-btn" onclick="event.stopPropagation(); openDeleteModal('${escapeHtml(g.name)}')" title="Delete">🗑</button>
+              </div>
+              <div class="group-icon">${g.icon}</div>
+              <div class="group-name">${g.name}</div>
+              <div class="group-stats">
+                <span class="group-status ${statusClass}"></span>
+                <span class="group-status-text">${statusText}</span>
+              </div>
+              <div class="group-capacity">${g.activeTerminals} / ${g.maxTerminals} terminals</div>
+            `;
+          } else {
+            card.innerHTML = `
+              <div class="group-icon">${g.icon}</div>
+              <div class="group-name">${g.name}</div>
+              <div class="group-stats">
+                <span class="group-status ${statusClass}"></span>
+                <span class="group-status-text">${statusText}</span>
+              </div>
+              <div class="group-capacity">${g.activeTerminals} / ${g.maxTerminals} terminals</div>
+              <button class="group-enter-btn">Enter</button>
+            `;
+            card.addEventListener('click', () => enterGroup(g.name));
+          }
+
+          grid.appendChild(card);
+        });
+
+        // Add the "+ Add Group" card in edit mode
+        if (editMode) {
+          const addCard = document.createElement('div');
+          addCard.className = 'group-card add-group-card';
+          addCard.innerHTML = `
+            <div class="group-icon" style="font-size:48px; opacity:0.5">+</div>
+            <div class="group-name" style="opacity:0.6">Add Group</div>
+          `;
+          addCard.addEventListener('click', () => openAddModal());
+          grid.appendChild(addCard);
+        }
+
+      } catch (err) {
+        document.getElementById('groups-grid').innerHTML =
+          '<p class="no-groups">Failed to load groups. Is the server running?</p>';
+      }
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    async function enterGroup(groupName) {
+      if (editMode) return;
+      document.querySelectorAll('.group-card').forEach(c => c.classList.add('entering'));
+      try {
+        const resp = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ group: groupName })
+        });
+        const data = await resp.json();
+        if (data.ok) {
+          window.location.href = '/';
+        } else {
+          alert(data.error || 'Failed to enter group');
+          document.querySelectorAll('.group-card').forEach(c => c.classList.remove('entering'));
+        }
+      } catch (err) {
+        alert('Connection error');
+        document.querySelectorAll('.group-card').forEach(c => c.classList.remove('entering'));
+      }
+    }
+
+    // ========== Modal: Add / Edit ==========
+    function openAddModal() {
+      document.getElementById('modal-title').textContent = 'New Group';
+      document.getElementById('form-save-btn').textContent = 'Create';
+      document.getElementById('form-original-name').value = '';
+      document.getElementById('form-name').value = '';
+      document.getElementById('form-icon').value = '🖥';
+      document.getElementById('form-color').value = '#64ffda';
+      document.getElementById('form-max').value = '10';
+      document.getElementById('group-modal').classList.remove('hidden');
+      document.getElementById('form-name').focus();
+    }
+
+    function openEditModal(name, icon, color, maxTerminals) {
+      document.getElementById('modal-title').textContent = 'Edit Group';
+      document.getElementById('form-save-btn').textContent = 'Save';
+      document.getElementById('form-original-name').value = name;
+      document.getElementById('form-name').value = name;
+      document.getElementById('form-icon').value = icon;
+      document.getElementById('form-color').value = color;
+      document.getElementById('form-max').value = maxTerminals;
+      document.getElementById('group-modal').classList.remove('hidden');
+      document.getElementById('form-name').focus();
+    }
+
+    function closeModal() {
+      document.getElementById('group-modal').classList.add('hidden');
+    }
+
+    function pickIcon(icon) {
+      document.getElementById('form-icon').value = icon;
+    }
+
+    function pickColor(color) {
+      document.getElementById('form-color').value = color;
+    }
+
+    async function submitGroupForm(e) {
+      e.preventDefault();
+      const originalName = document.getElementById('form-original-name').value;
+      const name = document.getElementById('form-name').value.trim();
+      const icon = document.getElementById('form-icon').value;
+      const color = document.getElementById('form-color').value;
+      const maxTerminals = parseInt(document.getElementById('form-max').value) || 10;
+
+      if (!name) return;
+
+      const saveBtn = document.getElementById('form-save-btn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+
+      try {
+        let resp;
+        if (originalName) {
+          // Edit existing
+          resp = await fetch('/api/groups/' + encodeURIComponent(originalName), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, icon, color, maxTerminals })
+          });
+        } else {
+          // Create new
+          resp = await fetch('/api/groups', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, icon, color, maxTerminals })
+          });
+        }
+        const data = await resp.json();
+        if (data.ok) {
+          closeModal();
+          loadGroups();
+        } else {
+          alert(data.error || 'Failed to save group');
+        }
+      } catch (err) {
+        alert('Connection error');
+      }
+
+      saveBtn.disabled = false;
+      saveBtn.textContent = originalName ? 'Save' : 'Create';
+    }
+
+    // ========== Modal: Delete ==========
+    let pendingDeleteName = null;
+
+    function openDeleteModal(name) {
+      pendingDeleteName = name;
+      document.getElementById('delete-group-name').textContent = name;
+      document.getElementById('delete-modal').classList.remove('hidden');
+    }
+
+    function closeDeleteModal() {
+      document.getElementById('delete-modal').classList.add('hidden');
+      pendingDeleteName = null;
+    }
+
+    document.getElementById('confirm-delete-btn').addEventListener('click', async () => {
+      if (!pendingDeleteName) return;
+      const btn = document.getElementById('confirm-delete-btn');
+      btn.disabled = true;
+      btn.textContent = 'Deleting...';
+
+      try {
+        const resp = await fetch('/api/groups/' + encodeURIComponent(pendingDeleteName), {
+          method: 'DELETE'
+        });
+        const data = await resp.json();
+        if (data.ok) {
+          closeDeleteModal();
+          loadGroups();
+        } else {
+          alert(data.error || 'Failed to delete group');
+        }
+      } catch (err) {
+        alert('Connection error');
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Delete';
+    });
+
+    // ========== Init ==========
+    loadGroups();
+    refreshInterval = setInterval(loadGroups, 5000);
+  </script>
+</body>
+</html>
