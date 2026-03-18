@@ -296,13 +296,12 @@
       <button class="img-nav-btn img-nav-prev" id="img-nav-prev" onclick="imgPreviewPrev()">‹</button>
       <img id="image-preview-img" src="" alt="Preview" />
       <button class="img-nav-btn img-nav-next" id="img-nav-next" onclick="imgPreviewNext()">›</button>
+      <div id="img-name-bubble" class="img-name-bubble hidden"></div>
       <div class="image-preview-footer">
-        <button class="img-nav-footer-btn" onclick="imgPreviewPrev()" id="img-nav-prev2">◀</button>
-        <span id="image-preview-name"></span>
+        <span id="image-preview-name" class="img-footer-name" onclick="toggleImgNameBubble()"></span>
         <span id="image-preview-counter"></span>
         <span id="image-preview-size"></span>
         <button class="fm-action-btn fm-download-btn" id="image-preview-download" onclick="imagePreviewDownload()">⬇️</button>
-        <button class="img-nav-footer-btn" onclick="imgPreviewNext()" id="img-nav-next2">▶</button>
       </div>
     </div>
   </div>
@@ -1148,7 +1147,10 @@
           img.src = '/api/fs/preview?path=' + encodeURIComponent(item.path);
         });
       }
-      document.getElementById('image-preview-name').textContent = item.name;
+      const nameEl = document.getElementById('image-preview-name');
+      nameEl.textContent = item.name;
+      nameEl.dataset.fullname = item.name;
+      document.getElementById('img-name-bubble').classList.add('hidden');
       document.getElementById('image-preview-size').textContent = item.size != null ? formatFileSize(item.size) : '';
       document.getElementById('image-preview-download').dataset.path = item.path;
       document.getElementById('image-preview-download').dataset.name = item.name;
@@ -1161,24 +1163,32 @@
       const hasList = fmImageList.length > 1 && fmImageIndex >= 0;
       const prevBtn = document.getElementById('img-nav-prev');
       const nextBtn = document.getElementById('img-nav-next');
-      const prevBtn2 = document.getElementById('img-nav-prev2');
-      const nextBtn2 = document.getElementById('img-nav-next2');
       const counter = document.getElementById('image-preview-counter');
 
       if (!hasList) {
         prevBtn.classList.add('hidden');
         nextBtn.classList.add('hidden');
-        prevBtn2.classList.add('hidden');
-        nextBtn2.classList.add('hidden');
         counter.textContent = '';
         return;
       }
 
       prevBtn.classList.toggle('hidden', fmImageIndex <= 0);
       nextBtn.classList.toggle('hidden', fmImageIndex >= fmImageList.length - 1);
-      prevBtn2.classList.toggle('hidden', fmImageIndex <= 0);
-      nextBtn2.classList.toggle('hidden', fmImageIndex >= fmImageList.length - 1);
       counter.textContent = `${fmImageIndex + 1} / ${fmImageList.length}`;
+    }
+
+    function toggleImgNameBubble() {
+      const bubble = document.getElementById('img-name-bubble');
+      const nameEl = document.getElementById('image-preview-name');
+      if (bubble.classList.contains('hidden')) {
+        bubble.textContent = nameEl.dataset.fullname || nameEl.textContent;
+        bubble.classList.remove('hidden');
+        // Auto-hide after 3s
+        clearTimeout(bubble._timer);
+        bubble._timer = setTimeout(() => bubble.classList.add('hidden'), 3000);
+      } else {
+        bubble.classList.add('hidden');
+      }
     }
 
     function imgPreviewPrev() {

@@ -2484,12 +2484,13 @@ html, body {
 
 /* ========== Image Preview Lightbox ========== */
 .image-preview-content {
-  max-width: 95vw;
-  max-height: 90vh;
-  width: auto;
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw !important;
+  max-height: 100vh;
   padding: 0;
-  background: #0a192f;
-  border-radius: 12px;
+  background: #000;
+  border-radius: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -2520,12 +2521,14 @@ html, body {
 }
 
 #image-preview-img {
-  max-width: 95vw;
-  max-height: calc(90vh - 56px);
+  width: 100%;
+  height: 100%;
+  max-width: 100vw;
+  max-height: calc(100vh - 48px);
   object-fit: contain;
   display: block;
   margin: 0 auto;
-  background: #111;
+  background: #000;
   flex: 1;
   min-height: 0;
 }
@@ -2614,6 +2617,37 @@ html, body {
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+#image-preview-name:active {
+  color: #64ffda;
+}
+
+/* Full filename bubble */
+.img-name-bubble {
+  position: absolute;
+  bottom: 52px;
+  left: 8px;
+  right: 8px;
+  background: rgba(22, 33, 62, 0.95);
+  color: #ccd6f6;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid #0f3460;
+  word-break: break-all;
+  z-index: 20;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+  animation: bubbleFadeIn 0.15s ease-out;
+}
+.img-name-bubble.hidden {
+  display: none;
+}
+@keyframes bubbleFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 #image-preview-counter {
