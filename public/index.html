@@ -350,12 +350,33 @@
       return resp;
     }
 
+    // ---- Modal animation helpers ----
+    function openModal(id) {
+      const el = document.getElementById(id);
+      el.classList.remove('hidden');
+      // Force reflow so transition plays
+      void el.offsetHeight;
+      el.classList.add('open');
+    }
+    function closeModal(id) {
+      const el = document.getElementById(id);
+      el.classList.remove('open');
+      // After transition ends, hide fully
+      const onEnd = () => {
+        el.classList.add('hidden');
+        el.removeEventListener('transitionend', onEnd);
+      };
+      el.addEventListener('transitionend', onEnd);
+      // Fallback in case transitionend doesn't fire
+      setTimeout(() => { el.classList.add('hidden'); }, 400);
+    }
+
     // ---- Shell modal ----
     function openShellModal() {
-      document.getElementById('shell-modal').classList.remove('hidden');
+      openModal('shell-modal');
     }
     function closeShellModal() {
-      document.getElementById('shell-modal').classList.add('hidden');
+      closeModal('shell-modal');
     }
 
     // ---- Recent directories (localStorage) ----
@@ -426,13 +447,13 @@
     }
 
     function openDirModal() {
-      document.getElementById('dir-modal').classList.remove('hidden');
+      openModal('dir-modal');
       renderRecentDirs();
       browseDirectory(''); // empty = server defaults to HOME
     }
 
     function closeDirModal() {
-      document.getElementById('dir-modal').classList.add('hidden');
+      closeModal('dir-modal');
       pendingShell = null;
       currentBrowsePath = '';
     }
@@ -680,13 +701,13 @@
     }
 
     function openFileManager() {
-      document.getElementById('file-manager-modal').classList.remove('hidden');
+      openModal('file-manager-modal');
       fmClearSelection();
       renderFmFavorites();
       browseFm('');
     }
     function closeFileManager() {
-      document.getElementById('file-manager-modal').classList.add('hidden');
+      closeModal('file-manager-modal');
       fmClearSelection();
       currentFmPath = '';
       // Clear image cache
@@ -919,11 +940,11 @@
       document.getElementById('fm-confirm-message').textContent = message;
       document.getElementById('fm-confirm-yes').textContent = btnLabel || 'Delete';
       fmConfirmCallback = onConfirm;
-      document.getElementById('fm-confirm-modal').classList.remove('hidden');
+      openModal('fm-confirm-modal');
     }
 
     function closeFmConfirm() {
-      document.getElementById('fm-confirm-modal').classList.add('hidden');
+      closeModal('fm-confirm-modal');
       fmConfirmCallback = null;
     }
 
@@ -1114,7 +1135,7 @@
         fmImageIndex = -1;
       }
       showImageAtIndex(fmImageIndex >= 0 ? fmImageIndex : -1, fmSelectedFile);
-      document.getElementById('image-preview-modal').classList.remove('hidden');
+      openModal('image-preview-modal');
       // Preload adjacent images
       preloadAdjacentImages();
     }
@@ -1226,7 +1247,7 @@
     }
 
     function closeImagePreview() {
-      document.getElementById('image-preview-modal').classList.add('hidden');
+      closeModal('image-preview-modal');
       document.getElementById('image-preview-img').src = '';
       fmImageIndex = -1;
     }
@@ -1273,7 +1294,7 @@
     // Keyboard navigation for image preview
     document.addEventListener('keydown', (e) => {
       const modal = document.getElementById('image-preview-modal');
-      if (modal.classList.contains('hidden')) return;
+      if (!modal.classList.contains('open')) return;
       if (e.key === 'ArrowLeft') { imgPreviewPrev(); e.preventDefault(); }
       else if (e.key === 'ArrowRight') { imgPreviewNext(); e.preventDefault(); }
       else if (e.key === 'Escape') { closeImagePreview(); e.preventDefault(); }
@@ -1440,14 +1461,14 @@
     function openTextInputModal() {
       const modal = document.getElementById('text-input-modal');
       const area = document.getElementById('text-input-area');
-      modal.classList.remove('hidden');
+      openModal('text-input-modal');
       area.value = '';
       clearAllAttachments();
       setTimeout(() => area.focus(), 150);
     }
 
     function closeTextInputModal(skipRefocus) {
-      document.getElementById('text-input-modal').classList.add('hidden');
+      closeModal('text-input-modal');
       document.getElementById('text-input-area').blur();
       clearAllAttachments();
       if (!skipRefocus) {
@@ -1711,7 +1732,7 @@
         // Close modal
         area.value = '';
         updateTextInputInfo();
-        document.getElementById('text-input-modal').classList.add('hidden');
+        closeModal('text-input-modal');
         area.blur();
         clearAllAttachments();
 
@@ -1764,7 +1785,7 @@
         // Close modal
         area.value = '';
         updateTextInputInfo();
-        document.getElementById('text-input-modal').classList.add('hidden');
+        closeModal('text-input-modal');
         area.blur();
         clearAttachedImages();
 
@@ -1867,6 +1888,14 @@
       capturedLinksSet.clear();
       renderLinksPanel();
     }
+
+    // ---- Terminal theme (single source of truth) ----
+    const TERMINAL_THEME = {
+      background: '#0a192f',
+      foreground: '#d2d2d2',
+      cursor: '#64ffda',
+      selectionBackground: '#1f4068'
+    };
 
     // ---- Zoom: step font sizes ----
     const ZOOM_LEVELS = [9, 11, 13, 16, 20];
@@ -2070,12 +2099,7 @@
           cursorBlink: true,
           fontSize: ZOOM_LEVELS[zoomIndex],
           fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
-          theme: {
-            background: '#0a192f',
-            foreground: '#d2d2d2',
-            cursor: '#64ffda',
-            selectionBackground: '#1f4068'
-          },
+          theme: TERMINAL_THEME,
           allowProposedApi: true,
           scrollback: 5000,
           scrollSensitivity: 3,
@@ -2453,12 +2477,7 @@
         cursorBlink: true,
         fontSize: ZOOM_LEVELS[zoomIndex],
         fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
-        theme: {
-          background: '#0a192f',
-          foreground: '#d2d2d2',
-          cursor: '#64ffda',
-          selectionBackground: '#1f4068'
-        },
+        theme: TERMINAL_THEME,
         allowProposedApi: true,
         scrollback: 5000,
         scrollSensitivity: 3,
