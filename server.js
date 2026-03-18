@@ -25,12 +25,14 @@ function writeLog(level, category, message, extra) {
     ? `[${ts}] [${level}] [${category}] ${message} | ${JSON.stringify(extra)}`
     : `[${ts}] [${level}] [${category}] ${message}`;
 
-  // Console output
-  if (level === 'ERROR' || level === 'FATAL') {
-    process.stderr.write(line + '\n');
-  } else {
-    process.stdout.write(line + '\n');
-  }
+  // Console output (wrapped to prevent EPIPE crash)
+  try {
+    if (level === 'ERROR' || level === 'FATAL') {
+      process.stderr.write(line + '\n');
+    } else {
+      process.stdout.write(line + '\n');
+    }
+  } catch (_) {}
 
   // File output
   try {
@@ -198,7 +200,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 
 // ========== Request Logging Middleware ==========
 app.use((req, res, next) => {
@@ -665,6 +667,143 @@ app.get('/api/fs/read', async (req, res) => {
   }
 });
 
+// ========== Image Upload API (for Claude Code attach) ==========
+const UPLOAD_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// Accept raw binary via multipart — we parse manually to avoid deps
+app.post('/api/upload-images', (req, res) => {
+  const contentType = req.headers['content-type'] || '';
+  if (!contentType.startsWith('multipart/form-data')) {
+    return res.status(400).json({ error: 'multipart/form-data required' });
+  }
+
+  const boundary = contentType.split('boundary=')[1];
+  if (!boundary) return res.status(400).json({ error: 'No boundary' });
+
+  const chunks = [];
+  req.on('data', (chunk) => chunks.push(chunk));
+  req.on('end', () => {
+    try {
+      const body = Buffer.concat(chunks);
+      const parts = parseMultipart(body, boundary);
+      const saved = [];
+
+      for (const part of parts) {
+        if (!part.filename) continue;
+
+        // Sanitize filename, keep extension
+        const ext = path.extname(part.filename).toLowerCase() || '.png';
+        const allowed = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
+        if (!allowed.includes(ext)) continue;
+
+        const ts = Date.now();
+        const rand = crypto.randomBytes(4).toString('hex');
+        const safeName = `img_${ts}_${rand}${ext}`;
+        const filePath = path.join(UPLOAD_DIR, safeName);
+
+        fs.writeFileSync(filePath, part.data);
+        saved.push({ name: safeName, path: filePath, size: part.data.length });
+        log.info('upload', `Saved image: ${safeName} (${(part.data.length / 1024).toFixed(1)} KB)`);
+      }
+
+      if (saved.length === 0) {
+        return res.status(400).json({ error: 'No valid image files found' });
+      }
+
+      res.json({ ok: true, files: saved });
+    } catch (err) {
+      log.error('upload', `Image upload failed: ${err.message}`, { stack: err.stack });
+      res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+// Simple multipart parser (no deps)
+function parseMultipart(body, boundary) {
+  const sep = Buffer.from(`--${boundary}`);
+  const parts = [];
+  let start = 0;
+
+  while (true) {
+    const idx = body.indexOf(sep, start);
+    if (idx === -1) break;
+
+    if (start > 0) {
+      // Extract part between previous boundary and this one
+      // Skip \r\n after boundary, and \r\n before next boundary
+      let partStart = start;
+      let partEnd = idx - 2; // remove trailing \r\n
+      if (partEnd > partStart) {
+        const partBuf = body.slice(partStart, partEnd);
+        const headerEnd = partBuf.indexOf('\r\n\r\n');
+        if (headerEnd !== -1) {
+          const headerStr = partBuf.slice(0, headerEnd).toString('utf-8');
+          const data = partBuf.slice(headerEnd + 4);
+
+          // Parse headers
+          const filenameMatch = headerStr.match(/filename="([^"]+)"/);
+          const filename = filenameMatch ? filenameMatch[1] : null;
+
+          parts.push({ headers: headerStr, filename, data });
+        }
+      }
+    }
+
+    start = idx + sep.length;
+    // Skip \r\n after boundary
+    if (body[start] === 0x0d && body[start + 1] === 0x0a) start += 2;
+    // Check for -- (end marker)
+    if (body[start] === 0x2d && body[start + 1] === 0x2d) break;
+  }
+
+  return parts;
+}
+
+// ========== Text Upload API (for long text paste) ==========
+app.post('/api/upload-text', express.text({ limit: '5mb', type: '*/*' }), (req, res) => {
+  try {
+    const text = typeof req.body === 'string' ? req.body : String(req.body);
+    if (!text || text.length === 0) {
+      return res.status(400).json({ error: 'No text provided' });
+    }
+
+    const MAX_TEXT_SIZE = 5 * 1024 * 1024; // 5 MB
+    if (Buffer.byteLength(text, 'utf-8') > MAX_TEXT_SIZE) {
+      return res.status(413).json({ error: 'Text too large (max 5 MB)' });
+    }
+
+    const ts = Date.now();
+    const rand = crypto.randomBytes(4).toString('hex');
+    const safeName = `text_${ts}_${rand}.txt`;
+    const filePath = path.join(UPLOAD_DIR, safeName);
+
+    fs.writeFileSync(filePath, text, 'utf-8');
+    log.info('upload', `Saved text file: ${safeName} (${(Buffer.byteLength(text, 'utf-8') / 1024).toFixed(1)} KB, ${text.length} chars)`);
+
+    res.json({ ok: true, name: safeName, path: filePath, size: Buffer.byteLength(text, 'utf-8'), chars: text.length });
+  } catch (err) {
+    log.error('upload', `Text upload failed: ${err.message}`, { stack: err.stack });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Cleanup old uploads (older than 24h) periodically
+setInterval(() => {
+  try {
+    const now = Date.now();
+    const files = fs.readdirSync(UPLOAD_DIR);
+    for (const f of files) {
+      const fp = path.join(UPLOAD_DIR, f);
+      const stat = fs.statSync(fp);
+      if (now - stat.mtimeMs > 24 * 60 * 60 * 1000) {
+        fs.unlinkSync(fp);
+        log.info('upload', `Cleaned up old upload: ${f}`);
+      }
+    }
+  } catch (_) {}
+}, 60 * 60 * 1000); // every hour
+
 // Serve static files (after auth)
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -827,7 +966,7 @@ app.delete('/api/terminal/:id', (req, res) => {
 // ========== Server + WebSocket ==========
 
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ noServer: true });
+const wss = new WebSocket.Server({ noServer: true, maxPayload: 5 * 1024 * 1024 });
 
 // WebSocket upgrade — validate master token + group token + group isolation
 server.on('upgrade', (req, socket, head) => {

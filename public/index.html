@@ -55,7 +55,8 @@
         <button class="vk-key vk-action" data-key="ArrowRight">▶</button>
         <button class="vk-key vk-danger" data-combo="ctrl+c">^C</button>
         <button class="vk-key vk-action" data-key="Escape">Esc</button>
-        <button class="vk-key vk-zoom-btn" id="vk-zoom-btn" title="Zoom">A</button>
+        <button class="vk-key vk-scroll-btn" id="vk-scroll-btn" title="Scroll to bottom">⤓</button>
+        <button class="vk-key vk-voice-btn" id="vk-voice-btn" title="Text input">✏️</button>
         <button class="vk-key vk-expand-btn" id="vk-expand-btn">···</button>
       </div>
       <!-- Expanded rows (hidden by default) -->
@@ -149,6 +150,13 @@
             <div class="links-panel-empty">No links captured yet. URLs and file paths from terminal output will appear here.</div>
           </div>
         </div>
+
+        <!-- ===== Utility row (always visible when expanded) ===== -->
+        <div class="vk-row vk-utility-row">
+          <button class="vk-key vk-util" id="vk-zoom-down" title="Smaller font">A−</button>
+          <span class="vk-zoom-label" id="vk-zoom-label">11px</span>
+          <button class="vk-key vk-util" id="vk-zoom-up" title="Larger font">A+</button>
+        </div>
       </div>
     </div>
 
@@ -159,6 +167,35 @@
       <button id="vk-toggle-btn" title="Toggle virtual keyboard">⌨</button>
       <button id="switch-group-btn" title="Switch group">⇄ Groups</button>
       <span id="terminal-count">0 terminals</span>
+    </div>
+
+    <!-- Text input modal (for iOS voice / IME input + image attach) -->
+    <div id="text-input-modal" class="modal hidden">
+      <div class="modal-backdrop" onclick="closeTextInputModal()"></div>
+      <div class="modal-content text-input-modal-content">
+        <h3>📝 Text Input</h3>
+        <textarea id="text-input-area" class="text-input-area" rows="3" placeholder="Type or use voice input here..." oninput="updateTextInputInfo()"></textarea>
+        <div class="text-input-info" id="text-input-info"></div>
+
+        <!-- Image attach section -->
+        <div class="img-attach-section">
+          <div class="img-attach-header">
+            <label class="img-attach-btn" for="img-file-input">📎 Attach Images</label>
+            <input type="file" id="img-file-input" accept="image/*" multiple style="display:none" onchange="handleImageSelect(this)">
+            <span id="img-attach-count" class="img-attach-count"></span>
+            <button id="img-attach-clear" class="img-attach-clear hidden" onclick="clearAttachedImages()">✕ Clear</button>
+          </div>
+          <div id="img-preview-area" class="img-preview-area hidden"></div>
+        </div>
+
+        <div class="text-input-actions">
+          <button class="form-btn form-btn-cancel" onclick="closeTextInputModal()">Cancel</button>
+          <button class="form-btn form-btn-save text-input-send" id="text-input-send" onclick="sendTextInput(false)">Send</button>
+          <button class="form-btn text-input-enter" onclick="sendTextInput(true)">Send + ↵</button>
+          <button class="form-btn text-input-file" id="text-input-file-btn" onclick="sendTextAsFile()" title="Save text as file on server, paste path into terminal">📄 As File</button>
+        </div>
+        <div class="text-input-hint">Voice 🎙️, text, or attach images for Claude Code. Paths auto-inserted.<br>Long text auto-chunked. Use 📄 to save as file &amp; paste path.</div>
+      </div>
     </div>
 
     <!-- Shell picker modal -->
@@ -557,6 +594,11 @@
       }
     });
 
+    // Prevent virtual keyboard buttons from stealing focus (keeps iOS on-screen keyboard open)
+    document.getElementById('vkeyboard').addEventListener('mousedown', (e) => {
+      // Allow focus only for text-input elements (like the expand section has none)
+      if (!e.target.closest('input, textarea')) e.preventDefault();
+    });
     // Prevent long-press context menu on virtual keyboard
     document.getElementById('vkeyboard').addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -588,6 +630,284 @@
       document.getElementById('vk-expand-btn').classList.toggle('vk-active', vkExpanded);
       if (activeId && sessions[activeId]) {
         setTimeout(() => sessions[activeId].fitAddon.fit(), 100);
+      }
+    });
+
+    // ---- Text Input Modal (for iOS voice / IME) ----
+    document.getElementById('vk-voice-btn').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openTextInputModal();
+    });
+
+    // ---- Image attach state ----
+    let pendingImages = []; // { file, previewUrl }
+
+    function openTextInputModal() {
+      const modal = document.getElementById('text-input-modal');
+      const area = document.getElementById('text-input-area');
+      modal.classList.remove('hidden');
+      area.value = '';
+      clearAttachedImages();
+      setTimeout(() => area.focus(), 150);
+    }
+
+    function closeTextInputModal(skipRefocus) {
+      document.getElementById('text-input-modal').classList.add('hidden');
+      document.getElementById('text-input-area').blur();
+      clearAttachedImages();
+      if (!skipRefocus) {
+        setTimeout(() => {
+          if (activeId && sessions[activeId] && sessions[activeId].terminal) {
+            sessions[activeId].terminal.focus();
+          }
+        }, 300);
+      }
+    }
+
+    function handleImageSelect(input) {
+      const files = Array.from(input.files || []);
+      for (const f of files) {
+        if (!f.type.startsWith('image/')) continue;
+        const url = URL.createObjectURL(f);
+        pendingImages.push({ file: f, previewUrl: url });
+      }
+      input.value = ''; // reset so same file can be re-selected
+      renderImagePreviews();
+    }
+
+    function renderImagePreviews() {
+      const area = document.getElementById('img-preview-area');
+      const count = document.getElementById('img-attach-count');
+      const clearBtn = document.getElementById('img-attach-clear');
+
+      if (pendingImages.length === 0) {
+        area.classList.add('hidden');
+        area.innerHTML = '';
+        count.textContent = '';
+        clearBtn.classList.add('hidden');
+        return;
+      }
+
+      count.textContent = `${pendingImages.length} image${pendingImages.length > 1 ? 's' : ''}`;
+      clearBtn.classList.remove('hidden');
+      area.classList.remove('hidden');
+      area.innerHTML = '';
+
+      pendingImages.forEach((img, idx) => {
+        const thumb = document.createElement('div');
+        thumb.className = 'img-thumb';
+        thumb.innerHTML = `
+          <img src="${img.previewUrl}" alt="preview">
+          <button class="img-thumb-remove" onclick="removeImage(${idx})">✕</button>
+        `;
+        area.appendChild(thumb);
+      });
+    }
+
+    function removeImage(idx) {
+      URL.revokeObjectURL(pendingImages[idx].previewUrl);
+      pendingImages.splice(idx, 1);
+      renderImagePreviews();
+    }
+
+    function clearAttachedImages() {
+      for (const img of pendingImages) URL.revokeObjectURL(img.previewUrl);
+      pendingImages = [];
+      renderImagePreviews();
+    }
+
+    async function uploadImages() {
+      if (pendingImages.length === 0) return [];
+
+      const formData = new FormData();
+      for (const img of pendingImages) {
+        formData.append('images', img.file);
+      }
+
+      setStatus('Uploading images...');
+      const resp = await authFetch('/api/upload-images', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      return data.files; // [{ name, path, size }]
+    }
+
+    // ---- Text input info (character count + long-text hints) ----
+    const CHUNK_THRESHOLD = 256;    // above this, chunk the sending
+    const CHUNK_SIZE = 128;         // characters per chunk
+    const CHUNK_DELAY = 30;         // ms between chunks
+    const FILE_SUGGEST_THRESHOLD = 4096; // above this, suggest "As File"
+
+    function updateTextInputInfo() {
+      const area = document.getElementById('text-input-area');
+      const info = document.getElementById('text-input-info');
+      const fileBtn = document.getElementById('text-input-file-btn');
+      const len = area.value.length;
+
+      if (len === 0) {
+        info.textContent = '';
+        info.className = 'text-input-info';
+        fileBtn.classList.remove('text-input-file-highlight');
+        return;
+      }
+
+      let msg = `${len.toLocaleString()} chars`;
+      let cls = 'text-input-info';
+
+      if (len > FILE_SUGGEST_THRESHOLD) {
+        msg += ' · Long text — use 📄 As File for best results';
+        cls += ' text-input-info-warn';
+        fileBtn.classList.add('text-input-file-highlight');
+      } else if (len > CHUNK_THRESHOLD) {
+        msg += ' · Will be sent in chunks';
+        cls += ' text-input-info-chunk';
+        fileBtn.classList.remove('text-input-file-highlight');
+      } else {
+        fileBtn.classList.remove('text-input-file-highlight');
+      }
+
+      info.textContent = msg;
+      info.className = cls;
+    }
+
+    // ---- Chunked text sending ----
+    function sendChunked(ws, text) {
+      return new Promise((resolve) => {
+        if (text.length <= CHUNK_THRESHOLD) {
+          ws.send(JSON.stringify({ type: 'input', data: text }));
+          resolve();
+          return;
+        }
+
+        let offset = 0;
+        function sendNext() {
+          if (offset >= text.length) {
+            resolve();
+            return;
+          }
+          const chunk = text.slice(offset, offset + CHUNK_SIZE);
+          ws.send(JSON.stringify({ type: 'input', data: chunk }));
+          offset += CHUNK_SIZE;
+          setTimeout(sendNext, CHUNK_DELAY);
+        }
+        sendNext();
+      });
+    }
+
+    async function sendTextInput(withEnter) {
+      const area = document.getElementById('text-input-area');
+      let text = area.value;
+      const hasImages = pendingImages.length > 0;
+
+      if (!text && !hasImages && !withEnter) return;
+
+      const s = sessions[activeId];
+      if (!s || !s.ws || s.ws.readyState !== WebSocket.OPEN) {
+        setStatus('No active terminal connected');
+        return;
+      }
+
+      try {
+        // Upload images first if any
+        let imagePaths = [];
+        if (hasImages) {
+          const uploaded = await uploadImages();
+          imagePaths = uploaded.map(f => f.path);
+        }
+
+        // Build final text: user text + image paths
+        let finalText = text || '';
+        if (imagePaths.length > 0) {
+          const pathStr = imagePaths.join(' ');
+          if (finalText) {
+            finalText = finalText + ' ' + pathStr;
+          } else {
+            finalText = pathStr;
+          }
+        }
+
+        // Close modal
+        area.value = '';
+        updateTextInputInfo();
+        document.getElementById('text-input-modal').classList.add('hidden');
+        area.blur();
+        clearAttachedImages();
+
+        // Send after modal dismissed (with chunking for long text)
+        setTimeout(async () => {
+          if (finalText) {
+            setStatus(`Sending ${finalText.length > CHUNK_THRESHOLD ? 'chunked ' : ''}text...`);
+            await sendChunked(s.ws, finalText);
+          }
+          if (withEnter) {
+            s.ws.send(JSON.stringify({ type: 'input', data: '\r' }));
+          }
+          setStatus(imagePaths.length > 0
+            ? `Sent with ${imagePaths.length} image${imagePaths.length > 1 ? 's' : ''}`
+            : `Sent (${finalText.length} chars)`);
+          setTimeout(() => {
+            if (activeId && sessions[activeId] && sessions[activeId].terminal) {
+              sessions[activeId].terminal.focus();
+            }
+          }, 100);
+        }, 200);
+      } catch (err) {
+        setStatus('Upload error: ' + err.message);
+      }
+    }
+
+    // ---- Send text as file (upload to server, paste path into terminal) ----
+    async function sendTextAsFile() {
+      const area = document.getElementById('text-input-area');
+      const text = area.value;
+      if (!text) return;
+
+      const s = sessions[activeId];
+      if (!s || !s.ws || s.ws.readyState !== WebSocket.OPEN) {
+        setStatus('No active terminal connected');
+        return;
+      }
+
+      try {
+        setStatus('Uploading text file...');
+        const resp = await authFetch('/api/upload-text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+          body: text
+        });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+
+        // Close modal
+        area.value = '';
+        updateTextInputInfo();
+        document.getElementById('text-input-modal').classList.add('hidden');
+        area.blur();
+        clearAttachedImages();
+
+        // Paste the file path into terminal
+        setTimeout(() => {
+          s.ws.send(JSON.stringify({ type: 'input', data: data.path }));
+          setStatus(`Text saved → ${data.name} (${(data.size / 1024).toFixed(1)} KB)`);
+          setTimeout(() => {
+            if (activeId && sessions[activeId] && sessions[activeId].terminal) {
+              sessions[activeId].terminal.focus();
+            }
+          }, 100);
+        }, 200);
+      } catch (err) {
+        setStatus('Upload error: ' + err.message);
+      }
+    }
+
+    // Cmd/Ctrl+Enter sends immediately
+    document.getElementById('text-input-area').addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        sendTextInput(true);
       }
     });
 
@@ -668,36 +988,112 @@
       renderLinksPanel();
     }
 
-    // ---- Zoom: cycle font sizes ----
-    const ZOOM_LEVELS = [
-      { size: 9,  label: 'A⁻' },
-      { size: 11, label: 'A'  },
-      { size: 13, label: 'A⁺' },
-      { size: 16, label: 'A⁺⁺' },
-    ];
+    // ---- Zoom: step font sizes ----
+    const ZOOM_LEVELS = [9, 11, 13, 16, 20];
     // Default: small on mobile, medium on desktop
     let zoomIndex = window.innerWidth < 768 ? 0 : 1;
 
     function applyZoom() {
-      const level = ZOOM_LEVELS[zoomIndex];
-      document.getElementById('vk-zoom-btn').textContent = level.label;
+      const size = ZOOM_LEVELS[zoomIndex];
+      document.getElementById('vk-zoom-label').textContent = size + 'px';
       // Apply to all terminal sessions (skip file viewers)
       for (const [id, s] of Object.entries(sessions)) {
         if (!s.terminal) continue;
-        s.terminal.options.fontSize = level.size;
+        s.terminal.options.fontSize = size;
         s.fitAddon.fit();
       }
     }
 
-    document.getElementById('vk-zoom-btn').addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      zoomIndex = (zoomIndex + 1) % ZOOM_LEVELS.length;
-      applyZoom();
+    document.getElementById('vk-zoom-down').addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (zoomIndex > 0) { zoomIndex--; applyZoom(); }
+    });
+    document.getElementById('vk-zoom-up').addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (zoomIndex < ZOOM_LEVELS.length - 1) { zoomIndex++; applyZoom(); }
     });
 
     // Initialize zoom label
-    document.getElementById('vk-zoom-btn').textContent = ZOOM_LEVELS[zoomIndex].label;
+    document.getElementById('vk-zoom-label').textContent = ZOOM_LEVELS[zoomIndex] + 'px';
+
+    // ---- Reflow helper: force xterm to re-render properly ----
+    function reflowActiveTerminal() {
+      const s = sessions[activeId];
+      if (!s || !s.terminal || !s.fitAddon) return;
+      // Briefly tweak font size to force full re-render, then restore
+      const origSize = s.terminal.options.fontSize;
+      s.terminal.options.fontSize = origSize + 1;
+      s.fitAddon.fit();
+      requestAnimationFrame(() => {
+        s.terminal.options.fontSize = origSize;
+        s.fitAddon.fit();
+      });
+    }
+
+    // ---- Scroll to bottom + reflow ----
+    document.getElementById('vk-scroll-btn').addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (activeId && sessions[activeId] && sessions[activeId].terminal) {
+        const term = sessions[activeId].terminal;
+        reflowActiveTerminal();
+        term.scrollToBottom();
+        term.focus();
+      }
+    });
+
+    // ---- iOS touch scroll fix for xterm.js ----
+    // xterm.js intercepts touch events for selection, making scroll nearly
+    // impossible on iOS.  We add a custom touchmove handler on the viewport
+    // that calls term.scrollLines() based on finger delta, giving smooth
+    // native-like scrolling on mobile.
+    function patchIOSTouchScroll(term, container) {
+      const viewport = container.querySelector('.xterm-viewport');
+      if (!viewport) return;
+
+      // Allow native touch scroll on the viewport
+      viewport.style.touchAction = 'pan-y';
+      viewport.style.overscrollBehavior = 'contain';
+
+      let touchStartY = 0;
+      let lastY = 0;
+      let scrolling = false;
+
+      container.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+          touchStartY = e.touches[0].clientY;
+          lastY = touchStartY;
+          scrolling = false;
+        }
+      }, { passive: true });
+
+      container.addEventListener('touchmove', (e) => {
+        if (e.touches.length !== 1) return;
+
+        const currentY = e.touches[0].clientY;
+        const deltaFromStart = Math.abs(currentY - touchStartY);
+        const deltaFromLast = lastY - currentY;
+
+        // Once finger moves >8px, it's a scroll gesture — not a tap/select
+        if (deltaFromStart > 8) {
+          scrolling = true;
+        }
+
+        if (scrolling) {
+          // Convert pixel delta to lines (roughly fontSize * 1.2 per line)
+          const lineHeight = (term.options.fontSize || 13) * 1.2;
+          const lines = Math.round(deltaFromLast / lineHeight);
+          if (lines !== 0) {
+            term.scrollLines(lines);
+            lastY = currentY;
+          }
+          e.preventDefault();
+        }
+      }, { passive: false });
+
+      container.addEventListener('touchend', () => {
+        scrolling = false;
+      }, { passive: true });
+    }
 
     // ---- Terminal management ----
 
@@ -762,7 +1158,9 @@
             selectionBackground: '#1f4068'
           },
           allowProposedApi: true,
-          scrollback: 5000
+          scrollback: 5000,
+          scrollSensitivity: 3,
+          fastScrollSensitivity: 10
         });
 
         const fitAddon = new FitAddon.FitAddon();
@@ -774,6 +1172,7 @@
 
         term.open(container);
         fitAddon.fit();
+        patchIOSTouchScroll(term, container);
 
         sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null, cwd: cwd || '' };
         connectWs(id);
@@ -1141,7 +1540,9 @@
           selectionBackground: '#1f4068'
         },
         allowProposedApi: true,
-        scrollback: 5000
+        scrollback: 5000,
+        scrollSensitivity: 3,
+        fastScrollSensitivity: 10
       });
 
       const fitAddon = new FitAddon.FitAddon();
@@ -1153,6 +1554,7 @@
 
       term.open(container);
       fitAddon.fit();
+      patchIOSTouchScroll(term, container);
 
       sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null, cwd: '' };
       connectWs(id);
@@ -1278,10 +1680,8 @@
             }
           }
           if (!anyDead) hideReconnectBanner();
-          // Re-fit active terminal
-          if (activeId && sessions[activeId] && sessions[activeId].fitAddon) {
-            sessions[activeId].fitAddon.fit();
-          }
+          // Reflow active terminal to fix garbled display after background
+          reflowActiveTerminal();
         }, 500);
       }
     });

@@ -32,7 +32,7 @@ Write-Host "[hub] Log: $serverLog" -ForegroundColor DarkGray
 
 # --- Optionally start tunnel (ngrok) ---
 if ($tunnel) {
-    $ngrok = "$env:APPDATA\npm\node_modules\ngrok\bin\ngrok.exe"
+    $ngrok = "$env:LOCALAPPDATA\Microsoft\WinGet\Links\ngrok.exe"
     if (!(Test-Path $ngrok)) {
         Write-Host "[tunnel] ngrok not found at $ngrok" -ForegroundColor Red
         exit 1

@@ -230,13 +230,33 @@ html, body {
   font-size: 13px;
 }
 
-.vk-zoom-btn {
+/* Scroll to bottom button */
+.vk-scroll-btn {
   background: #1a1a2e !important;
   color: #64ffda !important;
   border-color: #0f3460 !important;
   max-width: 40px !important;
-  font-size: 12px !important;
+  font-size: 16px !important;
   font-weight: 700 !important;
+}
+
+.vk-scroll-btn:active {
+  background: #64ffda !important;
+  color: #0a192f !important;
+}
+
+/* Voice/text input button */
+.vk-voice-btn {
+  background: #1b2838 !important;
+  color: #fbbf24 !important;
+  border-color: #78350f !important;
+  max-width: 40px !important;
+  font-size: 14px !important;
+}
+
+.vk-voice-btn:active {
+  background: #fbbf24 !important;
+  color: #0a192f !important;
 }
 
 .vk-expand-btn {
@@ -318,6 +338,39 @@ html, body {
 .vk-claude-warn:active {
   background: #a21caf !important;
   color: #fff !important;
+}
+
+/* ---- Utility row (zoom controls, always visible when expanded) ---- */
+.vk-utility-row {
+  border-top: 1px solid #1f2937;
+  margin-top: 2px;
+  padding-top: 4px;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+
+.vk-util {
+  background: #1a1a2e !important;
+  color: #8892b0 !important;
+  border-color: #374151 !important;
+  max-width: 48px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  flex: 0 0 auto !important;
+}
+
+.vk-util:active {
+  background: #374151 !important;
+  color: #e6f1ff !important;
+}
+
+.vk-zoom-label {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 600;
+  min-width: 36px;
+  text-align: center;
 }
 
 /* ---- Links badge on mode button ---- */
@@ -669,6 +722,216 @@ html, body {
   width: 32px;
   height: 32px;
   font-size: 14px;
+}
+
+/* ========== Text Input Modal ========== */
+.text-input-modal-content {
+  padding: 16px 20px;
+  max-height: 85vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.text-input-area {
+  width: 100%;
+  background: #0a192f;
+  border: 2px solid #0f3460;
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: #ccd6f6;
+  font-size: 16px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  outline: none;
+  resize: vertical;
+  line-height: 1.5;
+  margin-bottom: 12px;
+  min-height: 60px;
+  max-height: 40vh;
+}
+
+.text-input-area:focus {
+  border-color: #64ffda;
+}
+
+.text-input-area::placeholder {
+  color: #4a5568;
+}
+
+.text-input-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.text-input-actions .form-btn {
+  flex: 1;
+  padding: 12px 8px;
+  font-size: 14px;
+}
+
+.text-input-send {
+  background: #064e3b !important;
+  color: #34d399 !important;
+  border: 1px solid #10b981 !important;
+}
+
+.text-input-enter {
+  background: #1e3a5f !important;
+  color: #93c5fd !important;
+  border: 1px solid #2563eb !important;
+}
+
+.text-input-enter:active {
+  background: #2563eb !important;
+  color: #fff !important;
+}
+
+/* Text input info bar (character count) */
+.text-input-info {
+  font-size: 11px;
+  color: #6b7280;
+  text-align: right;
+  padding: 0 4px;
+  margin: -8px 0 10px;
+  min-height: 16px;
+  transition: color 0.15s;
+}
+
+.text-input-info-chunk {
+  color: #93c5fd;
+}
+
+.text-input-info-warn {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+/* "As File" button */
+.text-input-file {
+  background: #1e1b4b !important;
+  color: #a78bfa !important;
+  border: 1px solid #4c1d95 !important;
+}
+
+.text-input-file:active {
+  background: #5b21b6 !important;
+  color: #fff !important;
+}
+
+.text-input-file-highlight {
+  background: #4c1d95 !important;
+  color: #e9d5ff !important;
+  border-color: #7c3aed !important;
+  animation: pulse-file-btn 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-file-btn {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4); }
+  50% { box-shadow: 0 0 8px 2px rgba(124, 58, 237, 0.4); }
+}
+
+.text-input-hint {
+  color: #4a5568;
+  font-size: 11px;
+  text-align: center;
+  margin-top: 10px;
+  line-height: 1.5;
+}
+
+/* ========== Image Attach ========== */
+.img-attach-section {
+  margin-bottom: 12px;
+}
+
+.img-attach-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.img-attach-btn {
+  background: #1a1a2e;
+  color: #93c5fd;
+  border: 1px solid #2563eb;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.img-attach-btn:active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.img-attach-count {
+  font-size: 12px;
+  color: #8892b0;
+  flex: 1;
+}
+
+.img-attach-clear {
+  background: none;
+  border: 1px solid #374151;
+  color: #6b7280;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.img-attach-clear:active {
+  background: #7f1d1d;
+  color: #fca5a5;
+  border-color: #991b1b;
+}
+
+.img-preview-area {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.img-preview-area.hidden {
+  display: none;
+}
+
+.img-thumb {
+  position: relative;
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid #0f3460;
+}
+
+.img-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.img-thumb-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fca5a5;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 /* ========== Mobile tweaks ========== */

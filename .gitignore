@@ -1,5 +1,6 @@
 node_modules/
 logs/
+uploads/
 tunnel_url.txt
 server.log
 tunnel.log
