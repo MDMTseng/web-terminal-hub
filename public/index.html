@@ -15,6 +15,9 @@
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-canvas@0.5.0/lib/xterm-addon-canvas.min.js"></script>
 </head>
 <body>
+  <!-- Toast notification container -->
+  <div id="toast-container"></div>
+
   <div id="app">
     <!-- Top bar with tabs -->
     <div id="topbar">
@@ -59,8 +62,7 @@
         <button class="vk-key vk-action" data-key="Escape">Esc</button>
         <button class="vk-key vk-scroll-btn" id="vk-scroll-btn" title="Scroll to bottom">⤓</button>
         <button class="vk-key vk-voice-btn" id="vk-voice-btn" title="Text input">✏️</button>
-        <button class="vk-key vk-files-btn" id="vk-files-btn" title="File Manager">📁</button>
-        <button class="vk-key vk-expand-btn" id="vk-expand-btn">···</button>
+        <button class="vk-key vk-expand-btn" id="vk-expand-btn"><span id="vk-mode-label">Claude</span> ▾</button>
       </div>
       <!-- Expanded rows (hidden by default) -->
       <div id="vk-expanded" class="vk-expanded hidden">
@@ -159,6 +161,8 @@
           <button class="vk-key vk-util" id="vk-zoom-down" title="Smaller font">A−</button>
           <span class="vk-zoom-label" id="vk-zoom-label">11px</span>
           <button class="vk-key vk-util" id="vk-zoom-up" title="Larger font">A+</button>
+          <span class="vk-utility-spacer"></span>
+          <button class="vk-key vk-files-btn" id="vk-files-btn" title="File Manager">📁 Files</button>
         </div>
       </div>
     </div>
@@ -639,10 +643,10 @@
       if (!currentFmPath) return;
       if (isFmFavorite(currentFmPath)) {
         removeFmFavorite(currentFmPath);
-        setStatus('Removed from favorites');
+        showToast('Removed from favorites', 'info');
       } else {
         addFmFavorite(currentFmPath);
-        setStatus('Added to favorites');
+        showToast('Added to favorites', 'success');
       }
       updateFmStarBtn();
       renderFmFavorites();
@@ -881,7 +885,7 @@
       document.body.appendChild(a);
       a.click();
       setTimeout(() => document.body.removeChild(a), 200);
-      setStatus('Download started: ' + fmSelectedFile.name);
+      showToast('Download started: ' + fmSelectedFile.name, 'success');
     }
 
     async function fmView() {
@@ -893,14 +897,14 @@
     // ---- File Manager: New Folder ----
     async function fmNewFolder() {
       if (!currentFmPath) {
-        setStatus('Browse to a directory first');
+        showToast('Browse to a directory first', 'warning');
         return;
       }
       const name = prompt('New folder name:');
       if (!name || !name.trim()) return;
       const sanitized = name.replace(/[/\\]/g, '').replace(/\.\./g, '').trim();
       if (!sanitized) {
-        setStatus('Invalid folder name');
+        showToast('Invalid folder name', 'error');
         return;
       }
       try {
@@ -911,20 +915,20 @@
         });
         const data = await resp.json();
         if (data.error) {
-          setStatus('Error: ' + data.error);
+          showToast('Error: ' + data.error, 'error');
           return;
         }
-        setStatus('Created folder: ' + sanitized);
+        showToast('Created folder: ' + sanitized, 'success');
         await browseFm(currentFmPath);
       } catch (err) {
-        setStatus('Failed to create folder: ' + err.message);
+        showToast('Failed to create folder: ' + err.message, 'error');
       }
     }
 
     // ---- File Manager: Open Console Here ----
     function fmOpenConsole() {
       if (!currentFmPath) {
-        setStatus('Browse to a directory first');
+        showToast('Browse to a directory first', 'warning');
         return;
       }
       const cwd = currentFmPath;
@@ -949,6 +953,7 @@
     }
 
     function executeFmConfirm() {
+      haptic(30); // Longer haptic for destructive action
       if (fmConfirmCallback) {
         fmConfirmCallback();
       }
@@ -979,14 +984,14 @@
         });
         const data = await resp.json();
         if (data.error) {
-          setStatus('Delete error: ' + data.error);
+          showToast('Delete error: ' + data.error, 'error');
           return;
         }
-        setStatus('Deleted: ' + targetName);
+        showToast('Deleted: ' + targetName, 'success');
         fmClearSelection();
         await browseFm(currentFmPath);
       } catch (err) {
-        setStatus('Failed to delete: ' + err.message);
+        showToast('Failed to delete: ' + err.message, 'error');
       }
     }
 
@@ -1012,7 +1017,7 @@
     // ---- File Manager Upload ----
     function triggerFmUpload() {
       if (!currentFmPath) {
-        setStatus('Browse to a directory first');
+        showToast('Browse to a directory first', 'warning');
         return;
       }
       document.getElementById('fm-upload-input').click();
@@ -1027,7 +1032,7 @@
       let totalSize = 0;
       for (const f of files) totalSize += f.size;
       if (totalSize > MAX_UPLOAD) {
-        setStatus(`Upload too large: ${formatFileSize(totalSize)} (max 100 MB)`);
+        showToast(`Upload too large: ${formatFileSize(totalSize)} (max 100 MB)`, 'error', 4000);
         input.value = '';
         return;
       }
@@ -1058,12 +1063,12 @@
         });
 
         if (result.error) {
-          setStatus('Upload error: ' + result.error);
+          showToast('Upload error: ' + result.error, 'error');
           statusText.textContent = 'Upload failed: ' + result.error;
           statusText.style.color = '#fca5a5';
         } else {
           const names = result.files.map(f => f.savedAs).join(', ');
-          setStatus(`Uploaded: ${names}`);
+          showToast(`Uploaded: ${names}`, 'success');
           progressFill.style.width = '100%';
           statusText.textContent = `Uploaded ${result.files.length} file${result.files.length > 1 ? 's' : ''} successfully`;
           statusText.style.color = '#34d399';
@@ -1078,7 +1083,7 @@
           await browseFm(currentFmPath);
         }
       } catch (err) {
-        setStatus('Upload error: ' + err.message);
+        showToast('Upload error: ' + err.message, 'error');
         statusText.textContent = 'Upload failed: ' + err.message;
         statusText.style.color = '#fca5a5';
         if (err.message === 'Unauthorized') {
@@ -1176,7 +1181,7 @@
       document.getElementById('image-preview-download').dataset.path = item.path;
       document.getElementById('image-preview-download').dataset.name = item.name;
       img.onload = () => setStatus('Preview: ' + item.name);
-      img.onerror = () => setStatus('Failed to load: ' + item.name);
+      img.onerror = () => showToast('Failed to load: ' + item.name, 'error');
       updateImgNavState();
     }
 
@@ -1265,7 +1270,7 @@
       document.body.appendChild(a);
       a.click();
       setTimeout(() => document.body.removeChild(a), 200);
-      setStatus('Download started: ' + (fileName || 'file'));
+      showToast('Download started: ' + (fileName || 'file'), 'success');
     }
 
     // Image preview swipe support for mobile
@@ -1346,12 +1351,20 @@
       return String.fromCharCode(letter.toUpperCase().charCodeAt(0) - 64);
     }
 
+    // Haptic feedback helper
+    function haptic(ms = 10) {
+      if (navigator.vibrate) navigator.vibrate(ms);
+    }
+
     // Virtual keyboard button handler
     document.getElementById('vkeyboard').addEventListener('click', (e) => {
       const btn = e.target.closest('.vk-key');
       if (!btn) return;
       e.preventDefault();
       e.stopPropagation();
+
+      // Haptic feedback on key press
+      haptic();
 
       // Toggle modifier
       if (btn.classList.contains('vk-toggle')) {
@@ -1434,13 +1447,40 @@
 
     // Expand/collapse extra rows
     let vkExpanded = false;
+    const VK_MODES = ['claude', 'shell', 'links'];
+    function updateModeLabel() {
+      const labelNames = { claude: 'Claude', shell: 'Shell', links: 'Links' };
+      document.getElementById('vk-mode-label').textContent = labelNames[vkMode] || 'Claude';
+    }
+
     document.getElementById('vk-expand-btn').addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      vkExpanded = !vkExpanded;
-      document.getElementById('vk-expanded').classList.toggle('hidden', !vkExpanded);
-      document.getElementById('vk-expand-btn').textContent = vkExpanded ? '▾' : '···';
-      document.getElementById('vk-expand-btn').classList.toggle('vk-active', vkExpanded);
+      if (vkExpanded) {
+        // Cycle to next mode
+        const curIdx = VK_MODES.indexOf(vkMode);
+        const nextIdx = (curIdx + 1) % VK_MODES.length;
+        switchVkMode(VK_MODES[nextIdx]);
+      } else {
+        // First tap: expand
+        vkExpanded = true;
+        document.getElementById('vk-expanded').classList.remove('hidden');
+        document.getElementById('vk-expand-btn').classList.add('vk-active');
+        if (activeId && sessions[activeId]) {
+          setTimeout(() => sessions[activeId].fitAddon.fit(), 100);
+        }
+      }
+      updateModeLabel();
+    });
+
+    // Double-tap to collapse (long press or swipe down handled elsewhere)
+    let lastExpandTap = 0;
+    document.getElementById('vk-expand-btn').addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      vkExpanded = false;
+      document.getElementById('vk-expanded').classList.add('hidden');
+      document.getElementById('vk-expand-btn').classList.remove('vk-active');
       if (activeId && sessions[activeId]) {
         setTimeout(() => sessions[activeId].fitAddon.fit(), 100);
       }
@@ -1536,7 +1576,7 @@
         formData.append('images', img.file);
       }
 
-      setStatus('Uploading images...');
+      showToast('Uploading images...', 'info');
       const resp = await authFetch('/api/upload-images', {
         method: 'POST',
         body: formData
@@ -1619,7 +1659,7 @@
         formData.append('files', item.file);
       }
 
-      setStatus('Uploading files...');
+      showToast('Uploading files...', 'info');
       const resp = await authFetch('/api/upload-files', {
         method: 'POST',
         body: formData
@@ -1701,7 +1741,7 @@
 
       const s = sessions[activeId];
       if (!s || !s.ws || s.ws.readyState !== WebSocket.OPEN) {
-        setStatus('No active terminal connected');
+        showToast('No active terminal connected', 'error');
         return;
       }
 
@@ -1739,16 +1779,14 @@
         // Send after modal dismissed (with chunking for long text)
         setTimeout(async () => {
           if (finalText) {
-            setStatus(`Sending ${finalText.length > CHUNK_THRESHOLD ? 'chunked ' : ''}text...`);
             await sendChunked(s.ws, finalText);
           }
           if (withEnter) {
             s.ws.send(JSON.stringify({ type: 'input', data: '\r' }));
           }
-          const totalAttach = (hasImages ? pendingImages.length : 0) + (hasFiles ? pendingFiles.length : 0);
-          setStatus(attachPaths.length > 0
+          showToast(attachPaths.length > 0
             ? `Sent with ${attachPaths.length} attachment${attachPaths.length > 1 ? 's' : ''}`
-            : `Sent (${finalText.length} chars)`);
+            : `Sent (${finalText.length} chars)`, 'success');
           setTimeout(() => {
             if (activeId && sessions[activeId] && sessions[activeId].terminal) {
               sessions[activeId].terminal.focus();
@@ -1756,7 +1794,7 @@
           }, 100);
         }, 200);
       } catch (err) {
-        setStatus('Upload error: ' + err.message);
+        showToast('Upload error: ' + err.message, 'error');
       }
     }
 
@@ -1768,12 +1806,12 @@
 
       const s = sessions[activeId];
       if (!s || !s.ws || s.ws.readyState !== WebSocket.OPEN) {
-        setStatus('No active terminal connected');
+        showToast('No active terminal connected', 'error');
         return;
       }
 
       try {
-        setStatus('Uploading text file...');
+        showToast('Uploading text file...', 'info');
         const resp = await authFetch('/api/upload-text', {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain; charset=utf-8' },
@@ -1792,7 +1830,7 @@
         // Paste the file path into terminal
         setTimeout(() => {
           s.ws.send(JSON.stringify({ type: 'input', data: data.path }));
-          setStatus(`Text saved → ${data.name} (${(data.size / 1024).toFixed(1)} KB)`);
+          showToast(`Text saved → ${data.name} (${(data.size / 1024).toFixed(1)} KB)`, 'success');
           setTimeout(() => {
             if (activeId && sessions[activeId] && sessions[activeId].terminal) {
               sessions[activeId].terminal.focus();
@@ -1800,7 +1838,7 @@
           }, 100);
         }, 200);
       } catch (err) {
-        setStatus('Upload error: ' + err.message);
+        showToast('Upload error: ' + err.message, 'error');
       }
     }
 
@@ -1825,6 +1863,7 @@
       document.getElementById('vk-mode-claude').classList.toggle('active', mode === 'claude');
       document.getElementById('vk-mode-shell').classList.toggle('active', mode === 'shell');
       document.getElementById('vk-mode-links').classList.toggle('active', mode === 'links');
+      updateModeLabel();
       // Re-fit terminal after keyboard layout change
       if (activeId && sessions[activeId]) {
         setTimeout(() => {
@@ -1924,6 +1963,59 @@
 
     // Initialize zoom label
     document.getElementById('vk-zoom-label').textContent = ZOOM_LEVELS[zoomIndex] + 'px';
+
+    // ---- Pinch-to-zoom on terminal area ----
+    (function setupPinchZoom() {
+      const area = document.getElementById('terminal-area');
+      let initialDistance = 0;
+      let initialZoomIndex = 0;
+      let pinching = false;
+
+      function getDistance(touches) {
+        const dx = touches[0].clientX - touches[1].clientX;
+        const dy = touches[0].clientY - touches[1].clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+      }
+
+      area.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+          pinching = true;
+          initialDistance = getDistance(e.touches);
+          initialZoomIndex = zoomIndex;
+          e.preventDefault();
+        }
+      }, { passive: false });
+
+      area.addEventListener('touchmove', (e) => {
+        if (!pinching || e.touches.length !== 2) return;
+        e.preventDefault();
+
+        const currentDistance = getDistance(e.touches);
+        const ratio = currentDistance / initialDistance;
+
+        // Map pinch ratio to zoom index changes
+        // ratio > 1 = pinch out (zoom in), ratio < 1 = pinch in (zoom out)
+        let newIndex = initialZoomIndex;
+        if (ratio > 1.3) newIndex = Math.min(initialZoomIndex + 1, ZOOM_LEVELS.length - 1);
+        if (ratio > 1.7) newIndex = Math.min(initialZoomIndex + 2, ZOOM_LEVELS.length - 1);
+        if (ratio < 0.75) newIndex = Math.max(initialZoomIndex - 1, 0);
+        if (ratio < 0.55) newIndex = Math.max(initialZoomIndex - 2, 0);
+
+        if (newIndex !== zoomIndex) {
+          zoomIndex = newIndex;
+          applyZoom();
+          haptic(5);
+        }
+      }, { passive: false });
+
+      area.addEventListener('touchend', () => {
+        pinching = false;
+      }, { passive: true });
+
+      area.addEventListener('touchcancel', () => {
+        pinching = false;
+      }, { passive: true });
+    })();
 
     // ---- Reflow helper: force xterm to re-render properly ----
     function reflowActiveTerminal() {
@@ -2047,7 +2139,7 @@
 
     async function createTerminal(shell, cwd) {
       if (!shell) shell = 'bash';
-      setStatus('Starting terminal...');
+      showToast('Starting terminal...', 'info');
 
       const body = { shell, cols: 80, rows: 24 };
       if (cwd) body.cwd = cwd;
@@ -2139,7 +2231,7 @@
         updateCount();
 
       } catch (err) {
-        setStatus('Error: ' + err.message);
+        showToast('Error: ' + err.message, 'error');
       }
     }
 
@@ -2225,7 +2317,7 @@
         const data = await resp.json();
 
         if (data.error) {
-          setStatus(`Error: ${data.error}`);
+          showToast(`Error: ${data.error}`, 'error');
           return;
         }
 
@@ -2233,7 +2325,7 @@
         for (const [existingId, s] of Object.entries(sessions)) {
           if (s.type === 'file' && s.filePath === data.path) {
             switchTab(parseInt(existingId) || existingId);
-            setStatus(`Already open: ${data.name}`);
+            showToast(`Already open: ${data.name}`, 'info');
             return;
           }
         }
@@ -2314,7 +2406,7 @@
         document.getElementById('welcome').style.display = 'none';
         switchTab(id);
         updateCount();
-        setStatus(`Opened ${data.name}`);
+        showToast(`Opened ${data.name}`, 'success');
 
         // Scroll to highlighted line
         if (lineNumber) {
@@ -2325,7 +2417,7 @@
         }
 
       } catch (err) {
-        setStatus('Failed to open file: ' + err.message);
+        showToast('Failed to open file: ' + err.message, 'error');
       }
     }
 
@@ -2353,17 +2445,45 @@
       }
     }
 
+    // ---- Tab swipe gestures ----
+    (function setupTabSwipe() {
+      const area = document.getElementById('terminal-area');
+      let startX = 0, startY = 0;
+      area.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+      }, { passive: true });
+      area.addEventListener('touchend', (e) => {
+        if (e.changedTouches.length !== 1) return;
+        const dx = e.changedTouches[0].clientX - startX;
+        const dy = e.changedTouches[0].clientY - startY;
+        // Threshold: 80px horizontal, must be 2x vertical component
+        if (Math.abs(dx) < 80 || Math.abs(dx) < Math.abs(dy) * 2) return;
+        const ids = Object.keys(sessions);
+        if (ids.length < 2) return;
+        const curIdx = ids.indexOf(String(activeId));
+        if (curIdx < 0) return;
+        const nextIdx = dx < 0 ? curIdx + 1 : curIdx - 1;
+        if (nextIdx >= 0 && nextIdx < ids.length) {
+          switchTab(parseInt(ids[nextIdx]) || ids[nextIdx]);
+        }
+      }, { passive: true });
+    })();
+
     async function closeTerminal(id) {
-      setStatus('Closing...');
+      haptic(20);
+      showToast('Closing...', 'info', 1500);
       // Skip server DELETE for file viewer tabs
       if (!sessions[id] || sessions[id].type !== 'file') {
         try { await authFetch(`/api/terminal/${id}`, { method: 'DELETE' }); } catch (err) {}
       }
 
       if (sessions[id]) {
-        // Clear any pending reconnect timer
+        // Clear any pending reconnect timer and overlay
         if (sessions[id]._reconnectTimer) clearTimeout(sessions[id]._reconnectTimer);
-        // Mark as intentionally closing so ws.onclose won't show reconnect banner
+        if (sessions[id]._countdownInterval) clearInterval(sessions[id]._countdownInterval);
+        // Mark as intentionally closing so ws.onclose won't show reconnect overlay
         sessions[id]._closing = true;
         if (sessions[id].ws) sessions[id].ws.close();
         if (sessions[id].terminal) sessions[id].terminal.dispose();
@@ -2389,7 +2509,7 @@
         hideReconnectBanner();
       }
       updateCount();
-      setStatus('Terminal closed');
+      showToast('Terminal closed', 'info');
     }
 
     function getShellIcon(s) {
@@ -2404,6 +2524,33 @@
       return 'Bash';
     }
     function setStatus(t) { document.getElementById('status-text').textContent = t; }
+
+    // Toast notification system
+    function showToast(message, type = 'info', duration = 2500) {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      toast.textContent = message;
+      container.appendChild(toast);
+
+      // Auto dismiss
+      const timer = setTimeout(() => dismissToast(toast), duration);
+
+      // Tap to dismiss early
+      toast.addEventListener('click', () => {
+        clearTimeout(timer);
+        dismissToast(toast);
+      });
+    }
+
+    function dismissToast(toast) {
+      if (toast.classList.contains('toast-out')) return; // Already dismissing
+      toast.classList.add('toast-out');
+      toast.addEventListener('animationend', () => toast.remove());
+      // Fallback removal
+      setTimeout(() => { if (toast.parentNode) toast.remove(); }, 400);
+    }
+
     function updateCount() {
       const c = Object.keys(sessions).length;
       document.getElementById('terminal-count').textContent = c === 1 ? '1 term' : `${c} terms`;
@@ -2435,7 +2582,7 @@
 
         if (list.length === 0) return;
 
-        setStatus(`Reconnecting to ${list.length} terminal(s)...`);
+        showToast(`Reconnecting to ${list.length} terminal(s)...`, 'info');
         document.getElementById('welcome').style.display = 'none';
 
         for (const t of list) {
@@ -2443,7 +2590,7 @@
         }
 
         updateCount();
-        setStatus('Reconnected');
+        showToast('Reconnected', 'success');
       } catch (err) {
         console.error('Reconnect failed:', err);
       }
@@ -2532,7 +2679,8 @@
 
       ws.onopen = () => {
         setStatus(`Terminal #${id} connected`);
-        hideReconnectBanner();
+        showToast(`Terminal #${id} connected`, 'success', 1500);
+        hideReconnectOverlay(id);
         s.tab.classList.remove('tab-disconnected');
         // On reconnect: clear terminal so buffered replay doesn't double up
         s.terminal.clear();
@@ -2587,7 +2735,8 @@
         if (s._kicked || s._closing) return; // don't reconnect if kicked or intentionally closed
         s.tab.classList.add('tab-disconnected');
         setStatus('Disconnected');
-        showReconnectBanner();
+        showToast('Disconnected', 'warning');
+        showReconnectOverlay(id);
         // Auto-retry after 3s
         s._reconnectTimer = setTimeout(() => {
           if (sessions[id] && (!sessions[id].ws || sessions[id].ws.readyState !== WebSocket.OPEN)) {
@@ -2599,28 +2748,74 @@
       ws.onerror = () => {};
     }
 
-    // ---- Reconnect banner ----
-    function showReconnectBanner() {
-      let banner = document.getElementById('reconnect-banner');
-      if (!banner) {
-        banner = document.createElement('div');
-        banner.id = 'reconnect-banner';
-        banner.innerHTML = `
-          <span>Connection lost — reconnecting...</span>
-          <button onclick="reconnectAll()">Reconnect Now</button>
-        `;
-        document.getElementById('app').insertBefore(banner, document.getElementById('terminal-area'));
-      }
-      banner.style.display = 'flex';
+    // ---- Reconnect overlay (per-terminal) ----
+    function showReconnectOverlay(id) {
+      const s = sessions[id];
+      if (!s || !s.container) return;
+
+      // Don't duplicate
+      if (s.container.querySelector('.reconnect-overlay')) return;
+
+      s.container.classList.add('terminal-reconnecting');
+
+      const overlay = document.createElement('div');
+      overlay.className = 'reconnect-overlay';
+
+      const countdownSec = 3;
+      overlay.innerHTML = `
+        <span class="reconnect-icon">📡</span>
+        <span class="reconnect-text">Connection lost</span>
+        <span class="reconnect-countdown">Reconnecting in <b class="rc-seconds">${countdownSec}</b>s...</span>
+        <button class="reconnect-btn" onclick="reconnectAll()">Reconnect Now</button>
+      `;
+      s.container.appendChild(overlay);
+
+      // Countdown timer
+      let remaining = countdownSec;
+      const secEl = overlay.querySelector('.rc-seconds');
+      s._countdownInterval = setInterval(() => {
+        remaining--;
+        if (remaining <= 0) {
+          clearInterval(s._countdownInterval);
+          if (secEl) secEl.textContent = '0';
+        } else {
+          if (secEl) secEl.textContent = remaining;
+        }
+      }, 1000);
     }
 
+    function hideReconnectOverlay(id) {
+      const s = sessions[id];
+      if (!s || !s.container) return;
+
+      // Clear countdown
+      if (s._countdownInterval) {
+        clearInterval(s._countdownInterval);
+        s._countdownInterval = null;
+      }
+
+      s.container.classList.remove('terminal-reconnecting');
+      const overlay = s.container.querySelector('.reconnect-overlay');
+      if (overlay) overlay.remove();
+
+      // Green flash on successful reconnect
+      s.container.classList.add('terminal-reconnected');
+      setTimeout(() => s.container.classList.remove('terminal-reconnected'), 600);
+    }
+
+    // Legacy aliases for compatibility
+    function showReconnectBanner() {
+      // Now handled per-terminal via showReconnectOverlay
+    }
     function hideReconnectBanner() {
-      const banner = document.getElementById('reconnect-banner');
-      if (banner) banner.style.display = 'none';
+      // Hide all overlays
+      for (const [id, s] of Object.entries(sessions)) {
+        hideReconnectOverlay(parseInt(id) || id);
+      }
     }
 
     function reconnectAll() {
-      setStatus('Reconnecting...');
+      showToast('Reconnecting...', 'info');
       for (const [id, s] of Object.entries(sessions)) {
         if (s.type === 'file') continue; // skip file viewers
         if (s._reconnectTimer) clearTimeout(s._reconnectTimer);
