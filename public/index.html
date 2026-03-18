@@ -11,6 +11,8 @@
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-webgl@0.16.0/lib/xterm-addon-webgl.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-canvas@0.5.0/lib/xterm-addon-canvas.min.js"></script>
 </head>
 <body>
   <div id="app">
@@ -57,6 +59,7 @@
         <button class="vk-key vk-action" data-key="Escape">Esc</button>
         <button class="vk-key vk-scroll-btn" id="vk-scroll-btn" title="Scroll to bottom">⤓</button>
         <button class="vk-key vk-voice-btn" id="vk-voice-btn" title="Text input">✏️</button>
+        <button class="vk-key vk-files-btn" id="vk-files-btn" title="File Manager">📁</button>
         <button class="vk-key vk-expand-btn" id="vk-expand-btn">···</button>
       </div>
       <!-- Expanded rows (hidden by default) -->
@@ -232,6 +235,81 @@
           <button class="form-btn form-btn-cancel" onclick="useHomeDirectory()">Home Dir</button>
           <button class="form-btn form-btn-cancel" onclick="closeDirModal()">Cancel</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- File Manager modal -->
+  <div id="file-manager-modal" class="modal hidden">
+    <div class="modal-backdrop" onclick="closeFileManager()"></div>
+    <div class="modal-content file-manager-content">
+      <div class="file-manager-header">
+        <h3>📂 File Manager</h3>
+        <input type="text" id="fm-path-input" class="form-input dir-path-input" placeholder="Type or paste a path..." />
+      </div>
+      <div id="fm-recent" class="dir-recent hidden"></div>
+      <div id="fm-breadcrumb" class="dir-breadcrumb"></div>
+      <div id="fm-entry-list" class="dir-entry-list"></div>
+      <div id="fm-error" class="dir-error hidden"></div>
+      <!-- File action bar (shown when file selected) -->
+      <div id="fm-file-actions" class="fm-file-actions hidden">
+        <div class="fm-file-info">
+          <span id="fm-selected-name"></span>
+          <span id="fm-selected-size"></span>
+        </div>
+        <div class="fm-action-btns">
+          <button class="fm-action-btn fm-download-btn" onclick="fmDownload()">⬇️ Download</button>
+          <button class="fm-action-btn fm-view-btn hidden" id="fm-view-btn" onclick="fmView()">📄 View</button>
+          <button class="fm-action-btn fm-preview-btn hidden" id="fm-preview-btn" onclick="fmPreview()">🖼️ Preview</button>
+          <button class="fm-action-btn fm-delete-btn" id="fm-delete-btn" onclick="fmDelete()">🗑️ Delete</button>
+          <button class="fm-action-btn fm-cancel-btn" onclick="fmClearSelection()">Cancel</button>
+        </div>
+      </div>
+      <!-- Upload progress -->
+      <div id="fm-upload-status" class="fm-upload-status hidden">
+        <span id="fm-upload-status-text">Uploading...</span>
+        <div class="fm-upload-progress-bar">
+          <div class="fm-upload-progress-fill" id="fm-upload-progress-fill"></div>
+        </div>
+      </div>
+      <div class="file-manager-footer">
+        <input type="file" id="fm-upload-input" multiple style="display:none" onchange="handleFmFileSelect(this)">
+        <button class="form-btn form-btn-console" id="fm-console-btn" onclick="fmOpenConsole()">$_</button>
+        <button class="form-btn form-btn-newfolder" id="fm-newfolder-btn" onclick="fmNewFolder()">📁+</button>
+        <button class="form-btn form-btn-upload" id="fm-upload-btn" onclick="triggerFmUpload()">⬆️ Upload</button>
+        <button class="form-btn form-btn-cancel" onclick="closeFileManager()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image preview lightbox -->
+  <div id="image-preview-modal" class="modal hidden" style="align-items:center;">
+    <div class="modal-backdrop" onclick="closeImagePreview()"></div>
+    <div class="modal-content image-preview-content">
+      <button class="image-preview-close" onclick="closeImagePreview()">&times;</button>
+      <button class="img-nav-btn img-nav-prev" id="img-nav-prev" onclick="imgPreviewPrev()">‹</button>
+      <img id="image-preview-img" src="" alt="Preview" />
+      <button class="img-nav-btn img-nav-next" id="img-nav-next" onclick="imgPreviewNext()">›</button>
+      <div class="image-preview-footer">
+        <button class="img-nav-footer-btn" onclick="imgPreviewPrev()" id="img-nav-prev2">◀</button>
+        <span id="image-preview-name"></span>
+        <span id="image-preview-counter"></span>
+        <span id="image-preview-size"></span>
+        <button class="fm-action-btn fm-download-btn" id="image-preview-download" onclick="imagePreviewDownload()">⬇️</button>
+        <button class="img-nav-footer-btn" onclick="imgPreviewNext()" id="img-nav-next2">▶</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirmation modal -->
+  <div id="fm-confirm-modal" class="modal hidden">
+    <div class="modal-backdrop" onclick="closeFmConfirm()"></div>
+    <div class="modal-content fm-confirm-content">
+      <h3 id="fm-confirm-title">Confirm</h3>
+      <p id="fm-confirm-message"></p>
+      <div class="fm-confirm-btns">
+        <button class="form-btn form-btn-delete" id="fm-confirm-yes" onclick="executeFmConfirm()">Delete</button>
+        <button class="form-btn form-btn-cancel" onclick="closeFmConfirm()">Cancel</button>
       </div>
     </div>
   </div>
@@ -501,6 +579,682 @@
         const val = e.target.value.trim();
         if (val) browseDirectory(val);
       }, 400);
+    });
+
+    // ---- File Manager ----
+    let currentFmPath = '';
+    let fmSelectedFile = null;
+    let fmInputTimer = null;
+
+    // Recent folders (localStorage)
+    const FM_RECENT_KEY = 'termhub_fm_recent_dirs';
+    const FM_RECENT_MAX = 8;
+
+    function getFmRecentDirs() {
+      try { return JSON.parse(localStorage.getItem(FM_RECENT_KEY)) || []; }
+      catch (_) { return []; }
+    }
+    function saveFmRecentDir(dirPath) {
+      if (!dirPath) return;
+      let dirs = getFmRecentDirs();
+      dirs = dirs.filter(d => d.toLowerCase() !== dirPath.toLowerCase());
+      dirs.unshift(dirPath);
+      if (dirs.length > FM_RECENT_MAX) dirs = dirs.slice(0, FM_RECENT_MAX);
+      localStorage.setItem(FM_RECENT_KEY, JSON.stringify(dirs));
+    }
+    function removeFmRecentDir(dirPath) {
+      let dirs = getFmRecentDirs();
+      dirs = dirs.filter(d => d.toLowerCase() !== dirPath.toLowerCase());
+      localStorage.setItem(FM_RECENT_KEY, JSON.stringify(dirs));
+    }
+    function renderFmRecent() {
+      const container = document.getElementById('fm-recent');
+      const dirs = getFmRecentDirs();
+      if (dirs.length === 0) { container.classList.add('hidden'); return; }
+      container.classList.remove('hidden');
+      container.innerHTML = '<div class="dir-recent-title">Recent</div>';
+      const list = document.createElement('div');
+      list.className = 'dir-recent-list';
+      for (const dir of dirs) {
+        const row = document.createElement('div');
+        row.className = 'dir-recent-row';
+        const lastSeg = dir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || dir;
+        row.innerHTML = `<span class="dir-recent-icon">&#x1F552;</span><span class="dir-recent-name" title="${escapeHtml(dir)}">${escapeHtml(lastSeg)}</span><span class="dir-recent-path">${escapeHtml(dir)}</span><button class="dir-recent-remove" title="Remove">&times;</button>`;
+        row.querySelector('.dir-recent-remove').addEventListener('click', (e) => {
+          e.stopPropagation();
+          removeFmRecentDir(dir);
+          renderFmRecent();
+        });
+        row.addEventListener('click', () => browseFm(dir));
+        list.appendChild(row);
+      }
+      container.appendChild(list);
+    }
+
+    // Image gallery navigation state
+    let fmImageList = [];    // [{name, path, size}, ...] images in current dir
+    let fmImageIndex = -1;   // current index in fmImageList
+    const fmImageCache = new Map(); // path -> blob URL (persists until FM closed)
+
+    const TEXT_EXTENSIONS = ['.txt','.js','.ts','.jsx','.tsx','.json','.md','.html','.htm','.css',
+      '.py','.sh','.bash','.zsh','.log','.xml','.yaml','.yml','.toml','.ini','.conf','.cfg',
+      '.c','.cpp','.h','.hpp','.java','.go','.rs','.rb','.php','.vue','.svelte',
+      '.sql','.r','.m','.swift','.kt','.cs','.fs','.hs','.lua','.pl','.ps1',
+      '.bat','.cmd','.env','.gitignore','.dockerfile','.makefile','.cmake'];
+    const IMAGE_EXTENSIONS = ['.png','.jpg','.jpeg','.gif','.webp','.bmp','.svg','.ico'];
+
+    function isTextFile(name) {
+      const ext = name.lastIndexOf('.') >= 0 ? name.slice(name.lastIndexOf('.')).toLowerCase() : '';
+      return TEXT_EXTENSIONS.includes(ext);
+    }
+    function isImageFile(name) {
+      const ext = name.lastIndexOf('.') >= 0 ? name.slice(name.lastIndexOf('.')).toLowerCase() : '';
+      return IMAGE_EXTENSIONS.includes(ext);
+    }
+
+    function openFileManager() {
+      document.getElementById('file-manager-modal').classList.remove('hidden');
+      fmClearSelection();
+      renderFmRecent();
+      browseFm('');
+    }
+    function closeFileManager() {
+      document.getElementById('file-manager-modal').classList.add('hidden');
+      fmClearSelection();
+      currentFmPath = '';
+      // Clear image cache
+      for (const blobUrl of fmImageCache.values()) {
+        try { URL.revokeObjectURL(blobUrl); } catch (_) {}
+      }
+      fmImageCache.clear();
+      fmImageList = [];
+      fmImageIndex = -1;
+    }
+
+    async function browseFm(dirPath) {
+      const listEl = document.getElementById('fm-entry-list');
+      const errorEl = document.getElementById('fm-error');
+      errorEl.classList.add('hidden');
+      fmClearSelection();
+      listEl.innerHTML = '<div class="dir-loading">Loading...</div>';
+
+      try {
+        const url = '/api/fs/browse' + (dirPath ? '?path=' + encodeURIComponent(dirPath) : '');
+        const resp = await authFetch(url);
+        const data = await resp.json();
+        if (data.error) {
+          errorEl.textContent = data.error;
+          errorEl.classList.remove('hidden');
+          listEl.innerHTML = '';
+          return;
+        }
+        currentFmPath = data.path;
+        document.getElementById('fm-path-input').value = data.path;
+        saveFmRecentDir(data.path);
+        renderFmBreadcrumb(data.path, data.separator);
+        renderFmEntries(data.entries, data.parent, data.path, data.separator);
+      } catch (err) {
+        errorEl.textContent = 'Failed to browse: ' + err.message;
+        errorEl.classList.remove('hidden');
+        listEl.innerHTML = '';
+      }
+    }
+
+    function renderFmBreadcrumb(fullPath, sep) {
+      const bc = document.getElementById('fm-breadcrumb');
+      bc.innerHTML = '';
+      const parts = fullPath.split(/[\\/]/).filter(Boolean);
+      let accumulated = '';
+      parts.forEach((part, i) => {
+        if (i > 0) {
+          const sepEl = document.createElement('span');
+          sepEl.className = 'dir-breadcrumb-sep';
+          sepEl.textContent = sep;
+          bc.appendChild(sepEl);
+        }
+        accumulated += (i === 0 ? '' : sep) + part;
+        const segPath = i === 0 ? part + sep : accumulated;
+        const btn = document.createElement('button');
+        btn.className = 'dir-breadcrumb-seg';
+        btn.textContent = part;
+        btn.addEventListener('click', () => browseFm(segPath));
+        bc.appendChild(btn);
+      });
+      bc.scrollLeft = bc.scrollWidth;
+    }
+
+    async function renderFmEntries(entries, parent, currentPath, sep) {
+      const listEl = document.getElementById('fm-entry-list');
+      const frag = document.createDocumentFragment();
+
+      // Build image list for gallery navigation
+      fmImageList = [];
+      const trailing = currentPath.endsWith(sep) ? '' : sep;
+      for (const entry of entries) {
+        if (entry.type === 'file' && isImageFile(entry.name)) {
+          fmImageList.push({ name: entry.name, path: currentPath + trailing + entry.name, size: entry.size });
+        }
+      }
+
+      if (parent === null) {
+        // Show drives at root
+        if (!cachedDrives) {
+          try {
+            const resp = await authFetch('/api/fs/drives');
+            const data = await resp.json();
+            cachedDrives = data.drives || [];
+          } catch (_) { cachedDrives = []; }
+        }
+        if (cachedDrives.length > 0) {
+          const drivesRow = document.createElement('div');
+          drivesRow.className = 'dir-drives-row';
+          for (const drive of cachedDrives) {
+            const btn = document.createElement('button');
+            btn.className = 'dir-drive-btn';
+            btn.textContent = drive;
+            btn.addEventListener('click', () => browseFm(drive));
+            drivesRow.appendChild(btn);
+          }
+          frag.appendChild(drivesRow);
+        }
+      } else {
+        const upRow = document.createElement('div');
+        upRow.className = 'dir-entry-row dir-up-row';
+        upRow.innerHTML = '<span class="dir-entry-icon">⬆</span><span class="dir-entry-name">..</span>';
+        upRow.addEventListener('click', () => browseFm(parent));
+        frag.appendChild(upRow);
+      }
+
+      for (const entry of entries) {
+        const row = document.createElement('div');
+        const fullPath = currentPath + trailing + entry.name;
+
+        if (entry.type === 'dir') {
+          row.className = 'dir-entry-row fm-dir-row';
+          row.innerHTML = `<span class="dir-entry-icon">📁</span><span class="dir-entry-name">${escapeHtml(entry.name)}</span><button class="fm-folder-delete" title="Delete folder">🗑️</button>`;
+          row.querySelector('.dir-entry-name').addEventListener('click', () => browseFm(fullPath));
+          row.querySelector('.dir-entry-icon').addEventListener('click', () => browseFm(fullPath));
+          row.querySelector('.fm-folder-delete').addEventListener('click', (e) => {
+            e.stopPropagation();
+            fmSelectFolder(entry, fullPath);
+          });
+        } else {
+          // File — clickable with size info
+          const isImg = isImageFile(entry.name);
+          const icon = isImg ? '🖼️' : '📄';
+          const sizeStr = entry.size != null ? formatFileSize(entry.size) : '';
+          row.className = 'dir-entry-row fm-file-row';
+          row.innerHTML = `<span class="dir-entry-icon">${icon}</span><span class="dir-entry-name">${escapeHtml(entry.name)}</span><span class="fm-entry-size">${sizeStr}</span>`;
+          row.addEventListener('click', () => fmSelectFile(entry, fullPath));
+        }
+        frag.appendChild(row);
+      }
+      listEl.innerHTML = '';
+      listEl.appendChild(frag);
+    }
+
+    function fmSelectFile(entry, fullPath) {
+      fmSelectedFile = { ...entry, path: fullPath };
+      const actionsEl = document.getElementById('fm-file-actions');
+      actionsEl.classList.remove('hidden');
+      document.getElementById('fm-selected-name').textContent = entry.name;
+      document.getElementById('fm-selected-size').textContent = entry.size != null ? formatFileSize(entry.size) : '';
+
+      // Show/hide context buttons — View for all non-image files, Preview for images
+      document.getElementById('fm-view-btn').classList.toggle('hidden', isImageFile(entry.name));
+      document.getElementById('fm-preview-btn').classList.toggle('hidden', !isImageFile(entry.name));
+      document.getElementById('fm-delete-btn').classList.remove('hidden');
+      // Ensure download btn is visible (may be hidden from folder selection)
+      document.querySelectorAll('#fm-file-actions .fm-download-btn').forEach(b => b.classList.remove('hidden'));
+
+      // Highlight selected row
+      document.querySelectorAll('#fm-entry-list .dir-entry-row').forEach(r => r.classList.remove('fm-selected'));
+      // Find clicked row by matching name
+      document.querySelectorAll('#fm-entry-list .fm-file-row').forEach(r => {
+        if (r.querySelector('.dir-entry-name').textContent === entry.name) r.classList.add('fm-selected');
+      });
+    }
+
+    function fmClearSelection() {
+      fmSelectedFile = null;
+      document.getElementById('fm-file-actions').classList.add('hidden');
+      document.querySelectorAll('#fm-entry-list .dir-entry-row').forEach(r => r.classList.remove('fm-selected'));
+    }
+
+    // ---- File Manager Actions ----
+    function fmDownload() {
+      if (!fmSelectedFile) return;
+      const url = '/api/fs/download?path=' + encodeURIComponent(fmSelectedFile.path);
+      // Try <a download> first, fallback to window.open
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fmSelectedFile.name;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => document.body.removeChild(a), 200);
+      setStatus('Download started: ' + fmSelectedFile.name);
+    }
+
+    async function fmView() {
+      if (!fmSelectedFile) return;
+      await openFileInViewer(fmSelectedFile.path);
+      closeFileManager();
+    }
+
+    // ---- File Manager: New Folder ----
+    async function fmNewFolder() {
+      if (!currentFmPath) {
+        setStatus('Browse to a directory first');
+        return;
+      }
+      const name = prompt('New folder name:');
+      if (!name || !name.trim()) return;
+      const sanitized = name.replace(/[/\\]/g, '').replace(/\.\./g, '').trim();
+      if (!sanitized) {
+        setStatus('Invalid folder name');
+        return;
+      }
+      try {
+        const resp = await authFetch('/api/fs/mkdir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dirPath: currentFmPath, name: sanitized })
+        });
+        const data = await resp.json();
+        if (data.error) {
+          setStatus('Error: ' + data.error);
+          return;
+        }
+        setStatus('Created folder: ' + sanitized);
+        await browseFm(currentFmPath);
+      } catch (err) {
+        setStatus('Failed to create folder: ' + err.message);
+      }
+    }
+
+    // ---- File Manager: Open Console Here ----
+    function fmOpenConsole() {
+      if (!currentFmPath) {
+        setStatus('Browse to a directory first');
+        return;
+      }
+      const cwd = currentFmPath;
+      closeFileManager();
+      createTerminal('bash', cwd);
+    }
+
+    // ---- File Manager: Delete ----
+    let fmConfirmCallback = null;
+
+    function openFmConfirm(title, message, btnLabel, onConfirm) {
+      document.getElementById('fm-confirm-title').textContent = title;
+      document.getElementById('fm-confirm-message').textContent = message;
+      document.getElementById('fm-confirm-yes').textContent = btnLabel || 'Delete';
+      fmConfirmCallback = onConfirm;
+      document.getElementById('fm-confirm-modal').classList.remove('hidden');
+    }
+
+    function closeFmConfirm() {
+      document.getElementById('fm-confirm-modal').classList.add('hidden');
+      fmConfirmCallback = null;
+    }
+
+    function executeFmConfirm() {
+      if (fmConfirmCallback) {
+        fmConfirmCallback();
+      }
+      closeFmConfirm();
+    }
+
+    function fmDelete() {
+      if (!fmSelectedFile) return;
+      const isDir = fmSelectedFile.type === 'dir';
+      const label = isDir ? 'folder' : 'file';
+      openFmConfirm(
+        `Delete ${label}?`,
+        `Are you sure you want to delete "${fmSelectedFile.name}"?${isDir ? ' (must be empty)' : ''}`,
+        '🗑️ Delete',
+        () => doDeleteSelected()
+      );
+    }
+
+    async function doDeleteSelected() {
+      if (!fmSelectedFile) return;
+      const targetPath = fmSelectedFile.path;
+      const targetName = fmSelectedFile.name;
+      try {
+        const resp = await authFetch('/api/fs/delete', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: targetPath })
+        });
+        const data = await resp.json();
+        if (data.error) {
+          setStatus('Delete error: ' + data.error);
+          return;
+        }
+        setStatus('Deleted: ' + targetName);
+        fmClearSelection();
+        await browseFm(currentFmPath);
+      } catch (err) {
+        setStatus('Failed to delete: ' + err.message);
+      }
+    }
+
+    // ---- File Manager: Select folder for delete ----
+    function fmSelectFolder(entry, fullPath) {
+      fmSelectedFile = { ...entry, path: fullPath, type: 'dir' };
+      const actionsEl = document.getElementById('fm-file-actions');
+      actionsEl.classList.remove('hidden');
+      document.getElementById('fm-selected-name').textContent = entry.name + '/';
+      document.getElementById('fm-selected-size').textContent = 'folder';
+
+      // Hide all buttons except delete and cancel
+      document.getElementById('fm-view-btn').classList.add('hidden');
+      document.getElementById('fm-preview-btn').classList.add('hidden');
+      document.getElementById('fm-delete-btn').classList.remove('hidden');
+      // Hide download for folders
+      document.querySelectorAll('#fm-file-actions .fm-download-btn').forEach(b => b.classList.add('hidden'));
+
+      // Highlight row
+      document.querySelectorAll('#fm-entry-list .dir-entry-row').forEach(r => r.classList.remove('fm-selected'));
+    }
+
+    // ---- File Manager Upload ----
+    function triggerFmUpload() {
+      if (!currentFmPath) {
+        setStatus('Browse to a directory first');
+        return;
+      }
+      document.getElementById('fm-upload-input').click();
+    }
+
+    async function handleFmFileSelect(input) {
+      const files = Array.from(input.files);
+      if (files.length === 0) return;
+
+      // Client-side size validation
+      const MAX_UPLOAD = 100 * 1024 * 1024; // 100 MB
+      let totalSize = 0;
+      for (const f of files) totalSize += f.size;
+      if (totalSize > MAX_UPLOAD) {
+        setStatus(`Upload too large: ${formatFileSize(totalSize)} (max 100 MB)`);
+        input.value = '';
+        return;
+      }
+
+      // Show upload status
+      const statusEl = document.getElementById('fm-upload-status');
+      const statusText = document.getElementById('fm-upload-status-text');
+      const progressFill = document.getElementById('fm-upload-progress-fill');
+      const uploadBtn = document.getElementById('fm-upload-btn');
+
+      statusEl.classList.remove('hidden');
+      uploadBtn.disabled = true;
+      statusText.textContent = `Uploading ${files.length} file${files.length > 1 ? 's' : ''}...`;
+      statusText.style.color = '';
+      progressFill.style.width = '0%';
+
+      // Build FormData
+      const formData = new FormData();
+      formData.append('targetDir', currentFmPath);
+      for (const file of files) {
+        formData.append('files', file);
+      }
+
+      try {
+        const result = await uploadWithProgress(formData, (pct) => {
+          progressFill.style.width = pct + '%';
+          statusText.textContent = `Uploading ${files.length} file${files.length > 1 ? 's' : ''}... ${Math.round(pct)}%`;
+        });
+
+        if (result.error) {
+          setStatus('Upload error: ' + result.error);
+          statusText.textContent = 'Upload failed: ' + result.error;
+          statusText.style.color = '#fca5a5';
+        } else {
+          const names = result.files.map(f => f.savedAs).join(', ');
+          setStatus(`Uploaded: ${names}`);
+          progressFill.style.width = '100%';
+          statusText.textContent = `Uploaded ${result.files.length} file${result.files.length > 1 ? 's' : ''} successfully`;
+          statusText.style.color = '#34d399';
+
+          // Warn about renames
+          const renamed = result.files.filter(f => f.name !== f.savedAs);
+          if (renamed.length > 0) {
+            statusText.textContent += ` (${renamed.length} renamed)`;
+          }
+
+          // Auto-refresh directory
+          await browseFm(currentFmPath);
+        }
+      } catch (err) {
+        setStatus('Upload error: ' + err.message);
+        statusText.textContent = 'Upload failed: ' + err.message;
+        statusText.style.color = '#fca5a5';
+        if (err.message === 'Unauthorized') {
+          window.location.href = '/welcome';
+          return;
+        }
+      } finally {
+        uploadBtn.disabled = false;
+        input.value = '';
+        setTimeout(() => {
+          statusEl.classList.add('hidden');
+          statusText.style.color = '';
+          progressFill.style.width = '0%';
+        }, 3000);
+      }
+    }
+
+    function uploadWithProgress(formData, onProgress) {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/fs/upload');
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            onProgress((e.loaded / e.total) * 100);
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status === 401) {
+            reject(new Error('Unauthorized'));
+            return;
+          }
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch (_) {
+            reject(new Error('Invalid server response'));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error('Network error'));
+        xhr.ontimeout = () => reject(new Error('Upload timed out'));
+        xhr.timeout = 300000; // 5 min timeout
+        xhr.send(formData);
+      });
+    }
+
+    function fmPreview() {
+      if (!fmSelectedFile) return;
+      // Find index in image list
+      fmImageIndex = fmImageList.findIndex(img => img.path === fmSelectedFile.path);
+      if (fmImageIndex < 0) {
+        // Not in list (shouldn't happen), just show standalone
+        fmImageIndex = -1;
+      }
+      showImageAtIndex(fmImageIndex >= 0 ? fmImageIndex : -1, fmSelectedFile);
+      document.getElementById('image-preview-modal').classList.remove('hidden');
+      // Preload adjacent images
+      preloadAdjacentImages();
+    }
+
+    function showImageAtIndex(idx, fileInfo) {
+      const item = idx >= 0 && idx < fmImageList.length ? fmImageList[idx] : fileInfo;
+      if (!item) return;
+      const img = document.getElementById('image-preview-img');
+      const cachedUrl = fmImageCache.get(item.path);
+      if (cachedUrl) {
+        img.src = '';
+        img.src = cachedUrl;
+      } else {
+        const url = '/api/fs/preview?path=' + encodeURIComponent(item.path);
+        img.src = '';
+        // Fetch as blob for caching
+        authFetch(url).then(resp => {
+          if (!resp.ok) throw new Error('Failed');
+          return resp.blob();
+        }).then(blob => {
+          const blobUrl = URL.createObjectURL(blob);
+          fmImageCache.set(item.path, blobUrl);
+          // Only set if still viewing this image
+          const curItem = fmImageIndex >= 0 ? fmImageList[fmImageIndex] : null;
+          if (curItem && curItem.path === item.path) {
+            img.src = blobUrl;
+          }
+        }).catch(() => {
+          // Fallback: direct URL load
+          img.src = '/api/fs/preview?path=' + encodeURIComponent(item.path);
+        });
+      }
+      document.getElementById('image-preview-name').textContent = item.name;
+      document.getElementById('image-preview-size').textContent = item.size != null ? formatFileSize(item.size) : '';
+      document.getElementById('image-preview-download').dataset.path = item.path;
+      document.getElementById('image-preview-download').dataset.name = item.name;
+      img.onload = () => setStatus('Preview: ' + item.name);
+      img.onerror = () => setStatus('Failed to load: ' + item.name);
+      updateImgNavState();
+    }
+
+    function updateImgNavState() {
+      const hasList = fmImageList.length > 1 && fmImageIndex >= 0;
+      const prevBtn = document.getElementById('img-nav-prev');
+      const nextBtn = document.getElementById('img-nav-next');
+      const prevBtn2 = document.getElementById('img-nav-prev2');
+      const nextBtn2 = document.getElementById('img-nav-next2');
+      const counter = document.getElementById('image-preview-counter');
+
+      if (!hasList) {
+        prevBtn.classList.add('hidden');
+        nextBtn.classList.add('hidden');
+        prevBtn2.classList.add('hidden');
+        nextBtn2.classList.add('hidden');
+        counter.textContent = '';
+        return;
+      }
+
+      prevBtn.classList.toggle('hidden', fmImageIndex <= 0);
+      nextBtn.classList.toggle('hidden', fmImageIndex >= fmImageList.length - 1);
+      prevBtn2.classList.toggle('hidden', fmImageIndex <= 0);
+      nextBtn2.classList.toggle('hidden', fmImageIndex >= fmImageList.length - 1);
+      counter.textContent = `${fmImageIndex + 1} / ${fmImageList.length}`;
+    }
+
+    function imgPreviewPrev() {
+      if (fmImageIndex <= 0 || fmImageList.length === 0) return;
+      fmImageIndex--;
+      showImageAtIndex(fmImageIndex);
+      preloadAdjacentImages();
+    }
+
+    function imgPreviewNext() {
+      if (fmImageIndex >= fmImageList.length - 1 || fmImageList.length === 0) return;
+      fmImageIndex++;
+      showImageAtIndex(fmImageIndex);
+      preloadAdjacentImages();
+    }
+
+    function preloadAdjacentImages() {
+      // Preload prev and next images into cache
+      const indices = [fmImageIndex - 1, fmImageIndex + 1];
+      for (const i of indices) {
+        if (i < 0 || i >= fmImageList.length) continue;
+        const item = fmImageList[i];
+        if (fmImageCache.has(item.path)) continue;
+        const url = '/api/fs/preview?path=' + encodeURIComponent(item.path);
+        authFetch(url).then(resp => {
+          if (!resp.ok) return;
+          return resp.blob();
+        }).then(blob => {
+          if (blob) {
+            const blobUrl = URL.createObjectURL(blob);
+            fmImageCache.set(item.path, blobUrl);
+          }
+        }).catch(() => {});
+      }
+    }
+
+    function closeImagePreview() {
+      document.getElementById('image-preview-modal').classList.add('hidden');
+      document.getElementById('image-preview-img').src = '';
+      fmImageIndex = -1;
+    }
+
+    function imagePreviewDownload() {
+      const btn = document.getElementById('image-preview-download');
+      const filePath = btn.dataset.path;
+      const fileName = btn.dataset.name;
+      if (!filePath) return;
+      const url = '/api/fs/download?path=' + encodeURIComponent(filePath);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName || 'download';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => document.body.removeChild(a), 200);
+      setStatus('Download started: ' + (fileName || 'file'));
+    }
+
+    // Image preview swipe support for mobile
+    (function() {
+      const imgContent = document.querySelector('.image-preview-content');
+      let swipeStartX = 0, swipeStartY = 0, swiping = false;
+      imgContent.addEventListener('touchstart', (e) => {
+        if (fmImageList.length <= 1) return;
+        swipeStartX = e.touches[0].clientX;
+        swipeStartY = e.touches[0].clientY;
+        swiping = true;
+      }, { passive: true });
+      imgContent.addEventListener('touchend', (e) => {
+        if (!swiping) return;
+        swiping = false;
+        const dx = e.changedTouches[0].clientX - swipeStartX;
+        const dy = e.changedTouches[0].clientY - swipeStartY;
+        // Only horizontal swipe, min 50px, and more horizontal than vertical
+        if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+          if (dx < 0) imgPreviewNext();  // swipe left = next
+          else imgPreviewPrev();          // swipe right = prev
+        }
+      }, { passive: true });
+    })();
+
+    // Keyboard navigation for image preview
+    document.addEventListener('keydown', (e) => {
+      const modal = document.getElementById('image-preview-modal');
+      if (modal.classList.contains('hidden')) return;
+      if (e.key === 'ArrowLeft') { imgPreviewPrev(); e.preventDefault(); }
+      else if (e.key === 'ArrowRight') { imgPreviewNext(); e.preventDefault(); }
+      else if (e.key === 'Escape') { closeImagePreview(); e.preventDefault(); }
+    });
+
+    // File manager path input
+    document.getElementById('fm-path-input').addEventListener('input', (e) => {
+      clearTimeout(fmInputTimer);
+      fmInputTimer = setTimeout(() => {
+        const val = e.target.value.trim();
+        if (val) browseFm(val);
+      }, 400);
+    });
+
+    // File manager button
+    document.getElementById('vk-files-btn').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openFileManager();
     });
 
     // ---- Virtual keyboard ----
@@ -990,8 +1744,8 @@
 
     // ---- Zoom: step font sizes ----
     const ZOOM_LEVELS = [9, 11, 13, 16, 20];
-    // Default: small on mobile, medium on desktop
-    let zoomIndex = window.innerWidth < 768 ? 0 : 1;
+    // Default: 9px for all devices
+    let zoomIndex = 0;
 
     function applyZoom() {
       const size = ZOOM_LEVELS[zoomIndex];
@@ -1044,6 +1798,45 @@
     // ---- iOS touch scroll fix for xterm.js ----
     // xterm.js intercepts touch events for selection, making scroll nearly
     // impossible on iOS.  We add a custom touchmove handler on the viewport
+    // ---- GPU-accelerated renderer (WebGL → Canvas → DOM fallback) ----
+    // WebGL gives ~900% faster rendering; Canvas is a good middle ground.
+    // Both dramatically improve layout stability during long output (e.g. Claude Code).
+    function loadBestRenderer(term) {
+      // Try WebGL first (requires WebGL2 context)
+      if (typeof WebglAddon !== 'undefined') {
+        try {
+          const webgl = new WebglAddon.WebglAddon();
+          webgl.onContextLoss(() => {
+            // If WebGL context is lost, fall back to canvas or DOM
+            console.warn('[renderer] WebGL context lost, disposing');
+            webgl.dispose();
+            loadCanvasRenderer(term);
+          });
+          term.loadAddon(webgl);
+          console.log('[renderer] WebGL renderer loaded');
+          return 'webgl';
+        } catch (e) {
+          console.warn('[renderer] WebGL not available:', e.message);
+        }
+      }
+      return loadCanvasRenderer(term);
+    }
+
+    function loadCanvasRenderer(term) {
+      if (typeof CanvasAddon !== 'undefined') {
+        try {
+          const canvas = new CanvasAddon.CanvasAddon();
+          term.loadAddon(canvas);
+          console.log('[renderer] Canvas renderer loaded');
+          return 'canvas';
+        } catch (e) {
+          console.warn('[renderer] Canvas not available:', e.message);
+        }
+      }
+      console.log('[renderer] Using default DOM renderer');
+      return 'dom';
+    }
+
     // that calls term.scrollLines() based on finger delta, giving smooth
     // native-like scrolling on mobile.
     function patchIOSTouchScroll(term, container) {
@@ -1149,7 +1942,7 @@
         // Create xterm.js — use current zoom level
         const term = new Terminal({
           cursorBlink: true,
-          fontSize: ZOOM_LEVELS[zoomIndex].size,
+          fontSize: ZOOM_LEVELS[zoomIndex],
           fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
           theme: {
             background: '#0a192f',
@@ -1171,10 +1964,11 @@
         } catch(e) {}
 
         term.open(container);
+        const renderer = loadBestRenderer(term);
         fitAddon.fit();
         patchIOSTouchScroll(term, container);
 
-        sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null, cwd: cwd || '' };
+        sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null, cwd: cwd || '', renderer };
         connectWs(id);
 
         term.onData((data) => {
@@ -1531,7 +2325,7 @@
 
       const term = new Terminal({
         cursorBlink: true,
-        fontSize: ZOOM_LEVELS[zoomIndex].size,
+        fontSize: ZOOM_LEVELS[zoomIndex],
         fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
         theme: {
           background: '#0a192f',
@@ -1553,10 +2347,11 @@
       } catch(e) {}
 
       term.open(container);
+      const renderer = loadBestRenderer(term);
       fitAddon.fit();
       patchIOSTouchScroll(term, container);
 
-      sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null, cwd: '' };
+      sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null, cwd: '', renderer };
       connectWs(id);
 
       term.onData((data) => {

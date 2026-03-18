@@ -594,7 +594,15 @@ app.get('/api/fs/browse', async (req, res) => {
 
     for (const d of dirents) {
       const type = d.isDirectory() ? 'dir' : 'file';
-      entries.push({ name: d.name, type });
+      const entry = { name: d.name, type };
+      if (type === 'file') {
+        try {
+          const st = await fsPromises.stat(path.join(real, d.name));
+          entry.size = st.size;
+        } catch (_) { entry.size = 0; }
+        entry.extension = path.extname(d.name).toLowerCase();
+      }
+      entries.push(entry);
     }
 
     // Sort: dirs first, then alphabetical
@@ -663,6 +671,292 @@ app.get('/api/fs/read', async (req, res) => {
     if (err.code === 'EACCES' || err.code === 'EPERM') {
       return res.status(403).json({ error: 'Permission denied' });
     }
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ========== File Download API ==========
+const MIME_MAP = {
+  '.html': 'text/html', '.htm': 'text/html', '.css': 'text/css', '.js': 'application/javascript',
+  '.json': 'application/json', '.xml': 'application/xml', '.txt': 'text/plain', '.md': 'text/markdown',
+  '.csv': 'text/csv', '.pdf': 'application/pdf', '.zip': 'application/zip', '.gz': 'application/gzip',
+  '.tar': 'application/x-tar', '.7z': 'application/x-7z-compressed', '.rar': 'application/vnd.rar',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+  '.webp': 'image/webp', '.bmp': 'image/bmp', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.mp4': 'video/mp4', '.webm': 'video/webm',
+  '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
+  '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.ppt': 'application/vnd.ms-powerpoint', '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.exe': 'application/octet-stream', '.dll': 'application/octet-stream',
+};
+
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  return MIME_MAP[ext] || 'application/octet-stream';
+}
+
+// GET /api/fs/download?path=<abs_path> — download a file
+app.get('/api/fs/download', async (req, res) => {
+  const filePath = req.query.path;
+  if (!filePath) return res.status(400).json({ error: 'Path is required' });
+
+  try {
+    const resolved = path.resolve(filePath);
+    const real = await fsPromises.realpath(resolved);
+    const stat = await fsPromises.stat(real);
+
+    if (!stat.isFile()) return res.status(404).json({ error: 'Not a file' });
+
+    const MAX_DOWNLOAD = 100 * 1024 * 1024; // 100 MB
+    if (stat.size > MAX_DOWNLOAD) {
+      return res.status(413).json({ error: `File too large (${(stat.size / 1024 / 1024).toFixed(0)} MB, max 100 MB)` });
+    }
+
+    const fileName = path.basename(real);
+    const mime = getMimeType(real);
+
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+    res.setHeader('Content-Length', stat.size);
+
+    const stream = fs.createReadStream(real);
+    stream.pipe(res);
+    stream.on('error', (err) => {
+      log.error('fs', `Download stream error: ${err.message}`);
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+    });
+
+    log.info('fs', `Download: ${fileName} (${(stat.size / 1024).toFixed(1)} KB)`);
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
+    if (err.code === 'EACCES' || err.code === 'EPERM') return res.status(403).json({ error: 'Permission denied' });
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ========== Image Preview API ==========
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ico'];
+
+// GET /api/fs/preview?path=<abs_path> — serve image inline for preview
+app.get('/api/fs/preview', async (req, res) => {
+  const filePath = req.query.path;
+  if (!filePath) return res.status(400).json({ error: 'Path is required' });
+
+  try {
+    const resolved = path.resolve(filePath);
+    const real = await fsPromises.realpath(resolved);
+    const stat = await fsPromises.stat(real);
+
+    if (!stat.isFile()) return res.status(404).json({ error: 'Not a file' });
+
+    const ext = path.extname(real).toLowerCase();
+    if (!IMAGE_EXTENSIONS.includes(ext)) {
+      return res.status(415).json({ error: `Not a supported image type: ${ext}` });
+    }
+
+    const MAX_PREVIEW = 50 * 1024 * 1024; // 50 MB
+    if (stat.size > MAX_PREVIEW) {
+      return res.status(413).json({ error: `Image too large (${(stat.size / 1024 / 1024).toFixed(0)} MB, max 50 MB)` });
+    }
+
+    const mime = getMimeType(real);
+    const fileName = path.basename(real);
+
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileName)}"`);
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Cache-Control', 'private, max-age=300'); // 5 min cache
+
+    const stream = fs.createReadStream(real);
+    stream.pipe(res);
+    stream.on('error', (err) => {
+      log.error('fs', `Preview stream error: ${err.message}`);
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+    });
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
+    if (err.code === 'EACCES' || err.code === 'EPERM') return res.status(403).json({ error: 'Permission denied' });
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ========== File Upload to Directory API (File Manager) ==========
+app.post('/api/fs/upload', (req, res) => {
+  const contentType = req.headers['content-type'] || '';
+  if (!contentType.startsWith('multipart/form-data')) {
+    return res.status(400).json({ error: 'multipart/form-data required' });
+  }
+
+  const boundaryMatch = contentType.match(/boundary=(.+)/);
+  if (!boundaryMatch) return res.status(400).json({ error: 'No boundary found' });
+  const boundary = boundaryMatch[1].replace(/;.*$/, '').trim();
+
+  const MAX_UPLOAD_SIZE = 100 * 1024 * 1024; // 100 MB
+  let totalSize = 0;
+  const chunks = [];
+  let aborted = false;
+
+  req.on('data', (chunk) => {
+    totalSize += chunk.length;
+    if (totalSize > MAX_UPLOAD_SIZE && !aborted) {
+      aborted = true;
+      res.status(413).json({ error: `Upload too large (max 100 MB)` });
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk);
+  });
+
+  req.on('end', async () => {
+    if (aborted) return;
+    try {
+      const body = Buffer.concat(chunks);
+      const parts = parseMultipart(body, boundary);
+
+      // Extract targetDir from form field
+      let targetDir = null;
+      for (const part of parts) {
+        if (!part.filename && part.fieldName === 'targetDir') {
+          targetDir = part.data.toString('utf-8').trim();
+          break;
+        }
+      }
+
+      if (!targetDir) {
+        return res.status(400).json({ error: 'targetDir field is required' });
+      }
+
+      // Validate target directory exists
+      let resolvedDir;
+      try {
+        const resolved = path.resolve(targetDir);
+        resolvedDir = await fsPromises.realpath(resolved);
+        const stat = await fsPromises.stat(resolvedDir);
+        if (!stat.isDirectory()) {
+          return res.status(400).json({ error: 'Target path is not a directory' });
+        }
+      } catch (err) {
+        if (err.code === 'ENOENT') return res.status(400).json({ error: 'Target directory does not exist' });
+        if (err.code === 'EACCES' || err.code === 'EPERM') return res.status(403).json({ error: 'Permission denied' });
+        return res.status(400).json({ error: 'Invalid target directory: ' + err.message });
+      }
+
+      // Check directory is writable
+      try {
+        await fsPromises.access(resolvedDir, fs.constants.W_OK);
+      } catch (_) {
+        return res.status(403).json({ error: 'Target directory is not writable' });
+      }
+
+      // Save each file part with overwrite protection
+      const saved = [];
+      for (const part of parts) {
+        if (!part.filename) continue; // skip text form fields
+
+        // Sanitize filename: strip path separators and .. to prevent traversal
+        const baseName = part.filename.replace(/[/\\]/g, '').replace(/\.\./g, '').trim();
+        if (!baseName) continue;
+
+        // Overwrite protection: append _1, _2, etc. if file exists
+        let finalName = baseName;
+        let filePath = path.join(resolvedDir, finalName);
+        let counter = 1;
+        while (fs.existsSync(filePath)) {
+          const ext = path.extname(baseName);
+          const stem = baseName.slice(0, baseName.length - ext.length);
+          finalName = `${stem}_${counter}${ext}`;
+          filePath = path.join(resolvedDir, finalName);
+          counter++;
+        }
+
+        fs.writeFileSync(filePath, part.data);
+        saved.push({
+          name: part.filename,
+          savedAs: finalName,
+          size: part.data.length
+        });
+        log.info('fs', `Upload: ${finalName} to ${resolvedDir} (${(part.data.length / 1024).toFixed(1)} KB)`);
+      }
+
+      if (saved.length === 0) {
+        return res.status(400).json({ error: 'No files found in upload' });
+      }
+
+      res.json({ ok: true, files: saved });
+    } catch (err) {
+      log.error('fs', `Upload failed: ${err.message}`);
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+// ========== Create Folder API ==========
+app.post('/api/fs/mkdir', express.json(), async (req, res) => {
+  const { dirPath, name } = req.body || {};
+  if (!dirPath || !name) {
+    return res.status(400).json({ error: 'dirPath and name are required' });
+  }
+
+  // Sanitize folder name
+  const sanitized = name.replace(/[/\\]/g, '').replace(/\.\./g, '').trim();
+  if (!sanitized) {
+    return res.status(400).json({ error: 'Invalid folder name' });
+  }
+
+  try {
+    const resolved = path.resolve(dirPath);
+    const real = await fsPromises.realpath(resolved);
+    const stat = await fsPromises.stat(real);
+    if (!stat.isDirectory()) {
+      return res.status(400).json({ error: 'Parent path is not a directory' });
+    }
+
+    // Check writable
+    await fsPromises.access(real, fs.constants.W_OK);
+
+    const newPath = path.join(real, sanitized);
+    await fsPromises.mkdir(newPath);
+    log.info('fs', `Created folder: ${newPath}`);
+    res.json({ ok: true, path: newPath });
+  } catch (err) {
+    if (err.code === 'EEXIST') return res.status(409).json({ error: 'Folder already exists' });
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'Parent directory not found' });
+    if (err.code === 'EACCES' || err.code === 'EPERM') return res.status(403).json({ error: 'Permission denied' });
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ========== Delete File/Folder API ==========
+app.delete('/api/fs/delete', express.json(), async (req, res) => {
+  const { path: filePath } = req.body || {};
+  if (!filePath) {
+    return res.status(400).json({ error: 'path is required' });
+  }
+
+  try {
+    const resolved = path.resolve(filePath);
+    const real = await fsPromises.realpath(resolved);
+    const stat = await fsPromises.stat(real);
+
+    // Check parent is writable
+    const parentDir = path.dirname(real);
+    await fsPromises.access(parentDir, fs.constants.W_OK);
+
+    if (stat.isDirectory()) {
+      await fsPromises.rmdir(real); // empty dirs only
+      log.info('fs', `Deleted folder: ${real}`);
+    } else {
+      await fsPromises.unlink(real);
+      log.info('fs', `Deleted file: ${real}`);
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.code === 'ENOTEMPTY') return res.status(400).json({ error: 'Directory is not empty' });
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'File or folder not found' });
+    if (err.code === 'EACCES' || err.code === 'EPERM') return res.status(403).json({ error: 'Permission denied' });
+    if (err.code === 'EBUSY') return res.status(400).json({ error: 'File is in use' });
     return res.status(500).json({ error: err.message });
   }
 });
@@ -744,8 +1038,10 @@ function parseMultipart(body, boundary) {
           // Parse headers
           const filenameMatch = headerStr.match(/filename="([^"]+)"/);
           const filename = filenameMatch ? filenameMatch[1] : null;
+          const nameMatch = headerStr.match(/name="([^"]+)"/);
+          const fieldName = nameMatch ? nameMatch[1] : null;
 
-          parts.push({ headers: headerStr, filename, data });
+          parts.push({ headers: headerStr, filename, fieldName, data });
         }
       }
     }
