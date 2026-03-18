@@ -183,12 +183,15 @@
         <!-- Image attach section -->
         <div class="img-attach-section">
           <div class="img-attach-header">
-            <label class="img-attach-btn" for="img-file-input">📎 Attach Images</label>
+            <label class="img-attach-btn" for="img-file-input">📎 Images</label>
             <input type="file" id="img-file-input" accept="image/*" multiple style="display:none" onchange="handleImageSelect(this)">
+            <label class="img-attach-btn file-attach-btn" for="file-attach-input">📁 Files</label>
+            <input type="file" id="file-attach-input" multiple style="display:none" onchange="handleFileAttach(this)">
             <span id="img-attach-count" class="img-attach-count"></span>
-            <button id="img-attach-clear" class="img-attach-clear hidden" onclick="clearAttachedImages()">✕ Clear</button>
+            <button id="img-attach-clear" class="img-attach-clear hidden" onclick="clearAllAttachments()">✕ Clear</button>
           </div>
           <div id="img-preview-area" class="img-preview-area hidden"></div>
+          <div id="file-attach-list" class="file-attach-list hidden"></div>
         </div>
 
         <div class="text-input-actions">
@@ -197,7 +200,7 @@
           <button class="form-btn text-input-enter" onclick="sendTextInput(true)">Send + ↵</button>
           <button class="form-btn text-input-file" id="text-input-file-btn" onclick="sendTextAsFile()" title="Save text as file on server, paste path into terminal">📄 As File</button>
         </div>
-        <div class="text-input-hint">Voice 🎙️, text, or attach images for Claude Code. Paths auto-inserted.<br>Long text auto-chunked. Use 📄 to save as file &amp; paste path.</div>
+        <div class="text-input-hint">Voice 🎙️, text, attach images or files. Paths auto-inserted.<br>📄 As File = save text as file on server &amp; paste path.</div>
       </div>
     </div>
 
@@ -245,9 +248,12 @@
     <div class="modal-content file-manager-content">
       <div class="file-manager-header">
         <h3>📂 File Manager</h3>
-        <input type="text" id="fm-path-input" class="form-input dir-path-input" placeholder="Type or paste a path..." />
+        <div class="fm-path-row">
+          <input type="text" id="fm-path-input" class="form-input dir-path-input" placeholder="Type or paste a path..." />
+          <button class="fm-star-btn" id="fm-star-btn" onclick="toggleFmFavorite()" title="Toggle favorite">☆</button>
+        </div>
       </div>
-      <div id="fm-recent" class="dir-recent hidden"></div>
+      <div id="fm-favorites" class="dir-recent hidden"></div>
       <div id="fm-breadcrumb" class="dir-breadcrumb"></div>
       <div id="fm-entry-list" class="dir-entry-list"></div>
       <div id="fm-error" class="dir-error hidden"></div>
@@ -586,44 +592,66 @@
     let fmSelectedFile = null;
     let fmInputTimer = null;
 
-    // Recent folders (localStorage)
-    const FM_RECENT_KEY = 'termhub_fm_recent_dirs';
-    const FM_RECENT_MAX = 8;
+    // Favorite folders (localStorage)
+    const FM_FAVS_KEY = 'termhub_fm_favorites';
 
-    function getFmRecentDirs() {
-      try { return JSON.parse(localStorage.getItem(FM_RECENT_KEY)) || []; }
+    function getFmFavorites() {
+      try { return JSON.parse(localStorage.getItem(FM_FAVS_KEY)) || []; }
       catch (_) { return []; }
     }
-    function saveFmRecentDir(dirPath) {
+    function addFmFavorite(dirPath) {
       if (!dirPath) return;
-      let dirs = getFmRecentDirs();
-      dirs = dirs.filter(d => d.toLowerCase() !== dirPath.toLowerCase());
-      dirs.unshift(dirPath);
-      if (dirs.length > FM_RECENT_MAX) dirs = dirs.slice(0, FM_RECENT_MAX);
-      localStorage.setItem(FM_RECENT_KEY, JSON.stringify(dirs));
+      let favs = getFmFavorites();
+      if (favs.some(d => d.toLowerCase() === dirPath.toLowerCase())) return;
+      favs.push(dirPath);
+      localStorage.setItem(FM_FAVS_KEY, JSON.stringify(favs));
     }
-    function removeFmRecentDir(dirPath) {
-      let dirs = getFmRecentDirs();
-      dirs = dirs.filter(d => d.toLowerCase() !== dirPath.toLowerCase());
-      localStorage.setItem(FM_RECENT_KEY, JSON.stringify(dirs));
+    function removeFmFavorite(dirPath) {
+      let favs = getFmFavorites();
+      favs = favs.filter(d => d.toLowerCase() !== dirPath.toLowerCase());
+      localStorage.setItem(FM_FAVS_KEY, JSON.stringify(favs));
     }
-    function renderFmRecent() {
-      const container = document.getElementById('fm-recent');
-      const dirs = getFmRecentDirs();
-      if (dirs.length === 0) { container.classList.add('hidden'); return; }
+    function isFmFavorite(dirPath) {
+      if (!dirPath) return false;
+      return getFmFavorites().some(d => d.toLowerCase() === dirPath.toLowerCase());
+    }
+    function toggleFmFavorite() {
+      if (!currentFmPath) return;
+      if (isFmFavorite(currentFmPath)) {
+        removeFmFavorite(currentFmPath);
+        setStatus('Removed from favorites');
+      } else {
+        addFmFavorite(currentFmPath);
+        setStatus('Added to favorites');
+      }
+      updateFmStarBtn();
+      renderFmFavorites();
+    }
+    function updateFmStarBtn() {
+      const btn = document.getElementById('fm-star-btn');
+      if (!btn) return;
+      const isFav = isFmFavorite(currentFmPath);
+      btn.textContent = isFav ? '★' : '☆';
+      btn.classList.toggle('fm-star-active', isFav);
+    }
+    function renderFmFavorites() {
+      const container = document.getElementById('fm-favorites');
+      const favs = getFmFavorites();
+      if (favs.length === 0) { container.classList.add('hidden'); return; }
       container.classList.remove('hidden');
-      container.innerHTML = '<div class="dir-recent-title">Recent</div>';
+      container.innerHTML = '<div class="dir-recent-title">⭐ Favorites</div>';
       const list = document.createElement('div');
       list.className = 'dir-recent-list';
-      for (const dir of dirs) {
+      for (const dir of favs) {
         const row = document.createElement('div');
         row.className = 'dir-recent-row';
         const lastSeg = dir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || dir;
-        row.innerHTML = `<span class="dir-recent-icon">&#x1F552;</span><span class="dir-recent-name" title="${escapeHtml(dir)}">${escapeHtml(lastSeg)}</span><span class="dir-recent-path">${escapeHtml(dir)}</span><button class="dir-recent-remove" title="Remove">&times;</button>`;
+        row.innerHTML = `<span class="dir-recent-icon">⭐</span><span class="dir-recent-name" title="${escapeHtml(dir)}">${escapeHtml(lastSeg)}</span><span class="dir-recent-path">${escapeHtml(dir)}</span><button class="dir-recent-remove" title="Remove">✕</button>`;
         row.querySelector('.dir-recent-remove').addEventListener('click', (e) => {
           e.stopPropagation();
-          removeFmRecentDir(dir);
-          renderFmRecent();
+          removeFmFavorite(dir);
+          renderFmFavorites();
+          updateFmStarBtn();
         });
         row.addEventListener('click', () => browseFm(dir));
         list.appendChild(row);
@@ -655,7 +683,7 @@
     function openFileManager() {
       document.getElementById('file-manager-modal').classList.remove('hidden');
       fmClearSelection();
-      renderFmRecent();
+      renderFmFavorites();
       browseFm('');
     }
     function closeFileManager() {
@@ -690,7 +718,7 @@
         }
         currentFmPath = data.path;
         document.getElementById('fm-path-input').value = data.path;
-        saveFmRecentDir(data.path);
+        updateFmStarBtn();
         renderFmBreadcrumb(data.path, data.separator);
         renderFmEntries(data.entries, data.parent, data.path, data.separator);
       } catch (err) {
@@ -1396,20 +1424,22 @@
 
     // ---- Image attach state ----
     let pendingImages = []; // { file, previewUrl }
+    // ---- File attach state ----
+    let pendingFiles = []; // { file }
 
     function openTextInputModal() {
       const modal = document.getElementById('text-input-modal');
       const area = document.getElementById('text-input-area');
       modal.classList.remove('hidden');
       area.value = '';
-      clearAttachedImages();
+      clearAllAttachments();
       setTimeout(() => area.focus(), 150);
     }
 
     function closeTextInputModal(skipRefocus) {
       document.getElementById('text-input-modal').classList.add('hidden');
       document.getElementById('text-input-area').blur();
-      clearAttachedImages();
+      clearAllAttachments();
       if (!skipRefocus) {
         setTimeout(() => {
           if (activeId && sessions[activeId] && sessions[activeId].terminal) {
@@ -1432,19 +1462,14 @@
 
     function renderImagePreviews() {
       const area = document.getElementById('img-preview-area');
-      const count = document.getElementById('img-attach-count');
-      const clearBtn = document.getElementById('img-attach-clear');
 
       if (pendingImages.length === 0) {
         area.classList.add('hidden');
         area.innerHTML = '';
-        count.textContent = '';
-        clearBtn.classList.add('hidden');
+        updateAttachCount();
         return;
       }
 
-      count.textContent = `${pendingImages.length} image${pendingImages.length > 1 ? 's' : ''}`;
-      clearBtn.classList.remove('hidden');
       area.classList.remove('hidden');
       area.innerHTML = '';
 
@@ -1457,6 +1482,7 @@
         `;
         area.appendChild(thumb);
       });
+      updateAttachCount();
     }
 
     function removeImage(idx) {
@@ -1481,6 +1507,89 @@
 
       setStatus('Uploading images...');
       const resp = await authFetch('/api/upload-images', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      return data.files; // [{ name, path, size }]
+    }
+
+    // ---- File attach functions ----
+    function handleFileAttach(input) {
+      const files = Array.from(input.files || []);
+      for (const f of files) {
+        // Skip images — those go through "Attach Images"
+        if (f.type.startsWith('image/')) continue;
+        pendingFiles.push({ file: f });
+      }
+      input.value = '';
+      renderFileList();
+      updateAttachCount();
+    }
+
+    function renderFileList() {
+      const container = document.getElementById('file-attach-list');
+      if (pendingFiles.length === 0) {
+        container.classList.add('hidden');
+        container.innerHTML = '';
+        return;
+      }
+      container.classList.remove('hidden');
+      container.innerHTML = '';
+      pendingFiles.forEach((item, idx) => {
+        const row = document.createElement('div');
+        row.className = 'file-attach-row';
+        const sizeKB = (item.file.size / 1024).toFixed(1);
+        const sizeStr = item.file.size >= 1048576 ? (item.file.size / 1048576).toFixed(1) + ' MB' : sizeKB + ' KB';
+        row.innerHTML = `<span class="file-attach-icon">📄</span><span class="file-attach-name" title="${escapeHtml(item.file.name)}">${escapeHtml(item.file.name)}</span><span class="file-attach-size">${sizeStr}</span><button class="file-attach-remove" onclick="removeAttachedFile(${idx})">✕</button>`;
+        container.appendChild(row);
+      });
+    }
+
+    function removeAttachedFile(idx) {
+      pendingFiles.splice(idx, 1);
+      renderFileList();
+      updateAttachCount();
+    }
+
+    function clearAttachedFiles() {
+      pendingFiles = [];
+      renderFileList();
+    }
+
+    function clearAllAttachments() {
+      clearAttachedImages();
+      clearAttachedFiles();
+      updateAttachCount();
+    }
+
+    function updateAttachCount() {
+      const countEl = document.getElementById('img-attach-count');
+      const clearBtn = document.getElementById('img-attach-clear');
+      const totalImages = pendingImages.length;
+      const totalFiles = pendingFiles.length;
+      const parts = [];
+      if (totalImages > 0) parts.push(`${totalImages} image${totalImages > 1 ? 's' : ''}`);
+      if (totalFiles > 0) parts.push(`${totalFiles} file${totalFiles > 1 ? 's' : ''}`);
+      countEl.textContent = parts.join(', ');
+      if (totalImages + totalFiles > 0) {
+        clearBtn.classList.remove('hidden');
+      } else {
+        clearBtn.classList.add('hidden');
+      }
+    }
+
+    async function uploadFiles() {
+      if (pendingFiles.length === 0) return [];
+
+      const formData = new FormData();
+      for (const item of pendingFiles) {
+        formData.append('files', item.file);
+      }
+
+      setStatus('Uploading files...');
+      const resp = await authFetch('/api/upload-files', {
         method: 'POST',
         body: formData
       });
@@ -1555,8 +1664,9 @@
       const area = document.getElementById('text-input-area');
       let text = area.value;
       const hasImages = pendingImages.length > 0;
+      const hasFiles = pendingFiles.length > 0;
 
-      if (!text && !hasImages && !withEnter) return;
+      if (!text && !hasImages && !hasFiles && !withEnter) return;
 
       const s = sessions[activeId];
       if (!s || !s.ws || s.ws.readyState !== WebSocket.OPEN) {
@@ -1566,16 +1676,21 @@
 
       try {
         // Upload images first if any
-        let imagePaths = [];
+        let attachPaths = [];
         if (hasImages) {
           const uploaded = await uploadImages();
-          imagePaths = uploaded.map(f => f.path);
+          attachPaths.push(...uploaded.map(f => f.path));
+        }
+        // Upload files if any
+        if (hasFiles) {
+          const uploaded = await uploadFiles();
+          attachPaths.push(...uploaded.map(f => f.path));
         }
 
-        // Build final text: user text + image paths
+        // Build final text: user text + attached file paths
         let finalText = text || '';
-        if (imagePaths.length > 0) {
-          const pathStr = imagePaths.join(' ');
+        if (attachPaths.length > 0) {
+          const pathStr = attachPaths.join(' ');
           if (finalText) {
             finalText = finalText + ' ' + pathStr;
           } else {
@@ -1588,7 +1703,7 @@
         updateTextInputInfo();
         document.getElementById('text-input-modal').classList.add('hidden');
         area.blur();
-        clearAttachedImages();
+        clearAllAttachments();
 
         // Send after modal dismissed (with chunking for long text)
         setTimeout(async () => {
@@ -1599,8 +1714,9 @@
           if (withEnter) {
             s.ws.send(JSON.stringify({ type: 'input', data: '\r' }));
           }
-          setStatus(imagePaths.length > 0
-            ? `Sent with ${imagePaths.length} image${imagePaths.length > 1 ? 's' : ''}`
+          const totalAttach = (hasImages ? pendingImages.length : 0) + (hasFiles ? pendingFiles.length : 0);
+          setStatus(attachPaths.length > 0
+            ? `Sent with ${attachPaths.length} attachment${attachPaths.length > 1 ? 's' : ''}`
             : `Sent (${finalText.length} chars)`);
           setTimeout(() => {
             if (activeId && sessions[activeId] && sessions[activeId].terminal) {
@@ -2389,10 +2505,16 @@
         setStatus(`Terminal #${id} connected`);
         hideReconnectBanner();
         s.tab.classList.remove('tab-disconnected');
+        // On reconnect: clear terminal so buffered replay doesn't double up
+        s.terminal.clear();
+        // Re-fit and send correct dimensions
+        try { s.fitAddon.fit(); } catch(_) {}
         const dims = s.fitAddon.proposeDimensions();
         if (dims) {
           ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
         }
+        // Mark as reconnecting — next data batch is the buffer replay
+        s._reconnecting = true;
       };
 
       ws.onmessage = (event) => {
@@ -2401,6 +2523,24 @@
           if (msg.type === 'output') {
             s.terminal.write(msg.data);
             scanOutputForLinks(msg.data);
+            // After reconnect buffer replay, reflow the terminal to fix garbled display
+            if (s._reconnecting) {
+              s._reconnecting = false;
+              setTimeout(() => {
+                try {
+                  s.fitAddon.fit();
+                  // Force full re-render via font-size toggle trick
+                  const origSize = s.terminal.options.fontSize;
+                  s.terminal.options.fontSize = origSize + 1;
+                  s.fitAddon.fit();
+                  requestAnimationFrame(() => {
+                    s.terminal.options.fontSize = origSize;
+                    s.fitAddon.fit();
+                    s.terminal.scrollToBottom();
+                  });
+                } catch(_) {}
+              }, 150);
+            }
           } else if (msg.type === 'exit') {
             s.terminal.write(`\r\n\x1b[31m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
           } else if (msg.type === 'error') {

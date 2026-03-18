@@ -934,6 +934,69 @@ html, body {
   line-height: 1;
 }
 
+/* ========== File Attach List ========== */
+.file-attach-btn {
+  background: #1a1a2e;
+  color: #a5b4fc;
+  border-color: #6366f1;
+}
+.file-attach-btn:active {
+  background: #6366f1;
+  color: #fff;
+}
+
+.file-attach-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.file-attach-list.hidden { display: none; }
+
+.file-attach-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.file-attach-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+.file-attach-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #cbd5e1;
+}
+.file-attach-size {
+  color: #64748b;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.file-attach-remove {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.file-attach-remove:active {
+  background: #7f1d1d;
+  color: #fca5a5;
+}
+
 /* ========== Mobile tweaks ========== */
 @media (max-width: 768px) {
   #tabs-container {
@@ -1646,12 +1709,51 @@ html, body {
   margin-bottom: 12px;
 }
 
+.fm-path-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fm-path-row .dir-path-input {
+  flex: 1;
+  min-width: 0;
+}
 .dir-path-input {
   font-size: 13px;
   font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
 }
 
-/* Recent directories section */
+/* Star / favorite button */
+.fm-star-btn {
+  background: none;
+  border: 1px solid #2a2a4a;
+  color: #4a5568;
+  font-size: 22px;
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+  line-height: 1;
+}
+.fm-star-btn:hover {
+  border-color: #f59e0b;
+  color: #f59e0b;
+}
+.fm-star-btn:active {
+  background: #78350f;
+}
+.fm-star-btn.fm-star-active {
+  color: #f59e0b;
+  border-color: #f59e0b;
+  text-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+/* Favorites section */
 .dir-recent {
   padding: 0 8px;
   flex-shrink: 0;

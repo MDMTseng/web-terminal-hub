@@ -49,8 +49,11 @@ const log = {
 
 // ========== Global Error Handlers ==========
 process.on('uncaughtException', (err) => {
-  log.fatal('process', `Uncaught Exception: ${err.message}`, { stack: err.stack });
-  // Keep running — don't crash on recoverable errors
+  // Ignore EPIPE errors (broken stdout/stderr pipe) to prevent infinite loop
+  if (err.code === 'EPIPE' || err.code === 'ERR_STREAM_DESTROYED') return;
+  try {
+    log.fatal('process', `Uncaught Exception: ${err.message}`, { stack: err.stack });
+  } catch (_) { /* prevent recursive crash if logging fails */ }
 });
 
 process.on('unhandledRejection', (reason, promise) => {
@@ -1008,6 +1011,64 @@ app.post('/api/upload-images', (req, res) => {
       res.json({ ok: true, files: saved });
     } catch (err) {
       log.error('upload', `Image upload failed: ${err.message}`, { stack: err.stack });
+      res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+// ========== General File Upload API (any file type, for attaching to terminal input) ==========
+app.post('/api/upload-files', (req, res) => {
+  const contentType = req.headers['content-type'] || '';
+  if (!contentType.startsWith('multipart/form-data')) {
+    return res.status(400).json({ error: 'multipart/form-data required' });
+  }
+
+  const boundary = contentType.split('boundary=')[1];
+  if (!boundary) return res.status(400).json({ error: 'No boundary' });
+
+  const MAX_SIZE = 100 * 1024 * 1024; // 100MB total
+  let totalSize = 0;
+  const chunks = [];
+
+  req.on('data', (chunk) => {
+    totalSize += chunk.length;
+    if (totalSize > MAX_SIZE) {
+      req.destroy();
+      return res.status(413).json({ error: 'Upload too large (max 100MB)' });
+    }
+    chunks.push(chunk);
+  });
+
+  req.on('end', () => {
+    try {
+      const body = Buffer.concat(chunks);
+      const parts = parseMultipart(body, boundary);
+      const saved = [];
+
+      for (const part of parts) {
+        if (!part.filename) continue;
+
+        // Sanitize filename: keep original name but remove path separators and dangerous chars
+        const origName = part.filename.replace(/[/\\:*?"<>|]/g, '_').replace(/\s+/g, '_');
+        const ext = path.extname(origName);
+        const base = path.basename(origName, ext) || 'file';
+        const ts = Date.now();
+        const rand = crypto.randomBytes(3).toString('hex');
+        const safeName = `${base}_${ts}_${rand}${ext}`;
+        const filePath = path.join(UPLOAD_DIR, safeName);
+
+        fs.writeFileSync(filePath, part.data);
+        saved.push({ name: origName, path: filePath, size: part.data.length });
+        log.info('upload', `Saved file: ${safeName} (${(part.data.length / 1024).toFixed(1)} KB)`);
+      }
+
+      if (saved.length === 0) {
+        return res.status(400).json({ error: 'No files found in upload' });
+      }
+
+      res.json({ ok: true, files: saved });
+    } catch (err) {
+      log.error('upload', `File upload failed: ${err.message}`, { stack: err.stack });
       res.status(500).json({ error: err.message });
     }
   });
