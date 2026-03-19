@@ -1149,13 +1149,25 @@
       const item = idx >= 0 && idx < fmImageList.length ? fmImageList[idx] : fileInfo;
       if (!item) return;
       const img = document.getElementById('image-preview-img');
+
+      // Track whether this image loaded successfully (to avoid false error toasts)
+      let loaded = false;
+
+      // Set handlers BEFORE changing src
+      img.onload = () => {
+        loaded = true;
+        setStatus('Preview: ' + item.name);
+      };
+      img.onerror = () => {
+        // Only show error if src is a real URL (not the blank reset) and no fallback is pending
+        if (loaded || !img.src || img.src === location.href) return;
+      };
+
       const cachedUrl = fmImageCache.get(item.path);
       if (cachedUrl) {
-        img.src = '';
         img.src = cachedUrl;
       } else {
         const url = '/api/fs/preview?path=' + encodeURIComponent(item.path);
-        img.src = '';
         // Fetch as blob for caching
         authFetch(url).then(resp => {
           if (!resp.ok) throw new Error('Failed');
@@ -1170,7 +1182,9 @@
           }
         }).catch(() => {
           // Fallback: direct URL load
-          img.src = '/api/fs/preview?path=' + encodeURIComponent(item.path);
+          const fallbackUrl = '/api/fs/preview?path=' + encodeURIComponent(item.path);
+          img.onerror = () => showToast('Failed to load: ' + item.name, 'error');
+          img.src = fallbackUrl;
         });
       }
       const nameEl = document.getElementById('image-preview-name');
@@ -1180,8 +1194,6 @@
       document.getElementById('image-preview-size').textContent = item.size != null ? formatFileSize(item.size) : '';
       document.getElementById('image-preview-download').dataset.path = item.path;
       document.getElementById('image-preview-download').dataset.name = item.name;
-      img.onload = () => setStatus('Preview: ' + item.name);
-      img.onerror = () => showToast('Failed to load: ' + item.name, 'error');
       updateImgNavState();
     }
 
@@ -1441,7 +1453,7 @@
       vkVisible = !vkVisible;
       document.getElementById('vkeyboard').style.display = vkVisible ? 'flex' : 'none';
       if (activeId && sessions[activeId]) {
-        setTimeout(() => sessions[activeId].fitAddon.fit(), 100);
+        setTimeout(() => fitAndKeepScroll(sessions[activeId]), 100);
       }
     });
 
@@ -1456,33 +1468,11 @@
     document.getElementById('vk-expand-btn').addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (vkExpanded) {
-        // Cycle to next mode
-        const curIdx = VK_MODES.indexOf(vkMode);
-        const nextIdx = (curIdx + 1) % VK_MODES.length;
-        switchVkMode(VK_MODES[nextIdx]);
-      } else {
-        // First tap: expand
-        vkExpanded = true;
-        document.getElementById('vk-expanded').classList.remove('hidden');
-        document.getElementById('vk-expand-btn').classList.add('vk-active');
-        if (activeId && sessions[activeId]) {
-          setTimeout(() => sessions[activeId].fitAddon.fit(), 100);
-        }
-      }
-      updateModeLabel();
-    });
-
-    // Double-tap to collapse (long press or swipe down handled elsewhere)
-    let lastExpandTap = 0;
-    document.getElementById('vk-expand-btn').addEventListener('dblclick', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      vkExpanded = false;
-      document.getElementById('vk-expanded').classList.add('hidden');
-      document.getElementById('vk-expand-btn').classList.remove('vk-active');
+      vkExpanded = !vkExpanded;
+      document.getElementById('vk-expanded').classList.toggle('hidden', !vkExpanded);
+      document.getElementById('vk-expand-btn').classList.toggle('vk-active', vkExpanded);
       if (activeId && sessions[activeId]) {
-        setTimeout(() => sessions[activeId].fitAddon.fit(), 100);
+        setTimeout(() => fitAndKeepScroll(sessions[activeId]), 100);
       }
     });
 
@@ -1866,9 +1856,7 @@
       updateModeLabel();
       // Re-fit terminal after keyboard layout change
       if (activeId && sessions[activeId]) {
-        setTimeout(() => {
-          if (sessions[activeId].fitAddon) sessions[activeId].fitAddon.fit();
-        }, 100);
+        setTimeout(() => fitAndKeepScroll(sessions[activeId]), 100);
       }
     }
 
@@ -1948,7 +1936,7 @@
       for (const [id, s] of Object.entries(sessions)) {
         if (!s.terminal) continue;
         s.terminal.options.fontSize = size;
-        s.fitAddon.fit();
+        fitAndKeepScroll(s);
       }
     }
 
@@ -2017,28 +2005,93 @@
       }, { passive: true });
     })();
 
-    // ---- Reflow helper: force xterm to re-render properly ----
-    function reflowActiveTerminal() {
-      const s = sessions[activeId];
+    // ---- Scroll-position tracking ----
+    // Track per-session whether the user has intentionally scrolled up.
+    // New output and fit() should snap to bottom UNLESS the user scrolled up.
+    // We detect "user scrolled up" via the onScroll event and reset it when
+    // new output arrives (onData from server pushes viewportY back to baseY).
+    function initScrollTracking(s) {
+      s._userScrolledUp = false;
+      s._suppressScrollTrack = false;
+
+      // When the viewport scrolls, check if user is NOT at bottom
+      s.terminal.onScroll(() => {
+        if (s._suppressScrollTrack) return;
+        const buf = s.terminal.buffer.active;
+        s._userScrolledUp = buf.viewportY < buf.baseY;
+      });
+    }
+
+    // Snap terminal to bottom, suppressing scroll tracking so the snap
+    // itself doesn't get misread as "user scrolled up".
+    function snapToBottom(s) {
+      if (!s || !s.terminal) return;
+      s._suppressScrollTrack = true;
+      s._userScrolledUp = false;
+      s.terminal.scrollToBottom();
+      // Release suppression after xterm settles
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => { s._suppressScrollTrack = false; });
+      });
+    }
+
+    // ---- Fit terminal and preserve scroll position ----
+    // After fit(), xterm reflows and may reset scroll to top.
+    // If user was at bottom (not manually scrolled up), snap back.
+    function fitAndKeepScroll(s) {
       if (!s || !s.terminal || !s.fitAddon) return;
-      // Briefly tweak font size to force full re-render, then restore
+      const shouldSnap = !s._userScrolledUp;
+      s._suppressScrollTrack = true;
+      s.fitAddon.fit();
+      if (shouldSnap) {
+        s.terminal.scrollToBottom();
+      }
+      // xterm may do additional async layout — re-snap after it settles
+      requestAnimationFrame(() => {
+        if (shouldSnap) s.terminal.scrollToBottom();
+        requestAnimationFrame(() => {
+          if (shouldSnap) s.terminal.scrollToBottom();
+          s._suppressScrollTrack = false;
+        });
+      });
+    }
+
+    // ---- Reflow helper: force xterm to re-render properly ----
+    // The font-size toggle trick forces a full re-render. The callback
+    // argument runs after the final fit() completes.
+    function reflowTerminal(s, callback) {
+      if (!s || !s.terminal || !s.fitAddon) return;
+      const shouldSnap = !s._userScrolledUp;
+      s._suppressScrollTrack = true;
       const origSize = s.terminal.options.fontSize;
       s.terminal.options.fontSize = origSize + 1;
       s.fitAddon.fit();
       requestAnimationFrame(() => {
         s.terminal.options.fontSize = origSize;
         s.fitAddon.fit();
+        if (shouldSnap) s.terminal.scrollToBottom();
+        s._suppressScrollTrack = false;
+        if (callback) callback();
       });
+    }
+
+    // Legacy wrapper for active terminal
+    function reflowActiveTerminal() {
+      const s = sessions[activeId];
+      reflowTerminal(s);
     }
 
     // ---- Scroll to bottom + reflow ----
     document.getElementById('vk-scroll-btn').addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
       if (activeId && sessions[activeId] && sessions[activeId].terminal) {
-        const term = sessions[activeId].terminal;
-        reflowActiveTerminal();
-        term.scrollToBottom();
-        term.focus();
+        const s = sessions[activeId];
+        // Reset scroll tracking and snap to bottom after reflow completes
+        s._userScrolledUp = false;
+        reflowTerminal(s, () => {
+          snapToBottom(s);
+        });
+        s.terminal.focus();
       }
     });
 
@@ -2211,6 +2264,7 @@
         patchIOSTouchScroll(term, container);
 
         sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null, cwd: cwd || '', renderer };
+        initScrollTracking(sessions[id]);
         connectWs(id);
 
         term.onData((data) => {
@@ -2438,7 +2492,7 @@
         activeId = id;
         setTimeout(() => {
           if (sessions[id] && sessions[id].terminal) {
-            sessions[id].fitAddon.fit();
+            fitAndKeepScroll(sessions[id]);
             sessions[id].terminal.focus();
           }
         }, 50);
@@ -2558,8 +2612,8 @@
 
     // Re-fit all on window resize
     window.addEventListener('resize', () => {
-      if (activeId && sessions[activeId] && sessions[activeId].fitAddon) {
-        sessions[activeId].fitAddon.fit();
+      if (activeId && sessions[activeId]) {
+        fitAndKeepScroll(sessions[activeId]);
       }
     });
 
@@ -2644,6 +2698,7 @@
       patchIOSTouchScroll(term, container);
 
       sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null, cwd: '', renderer };
+      initScrollTracking(sessions[id]);
       connectWs(id);
 
       term.onData((data) => {
@@ -2705,15 +2760,8 @@
               s._reconnecting = false;
               setTimeout(() => {
                 try {
-                  s.fitAddon.fit();
-                  // Force full re-render via font-size toggle trick
-                  const origSize = s.terminal.options.fontSize;
-                  s.terminal.options.fontSize = origSize + 1;
-                  s.fitAddon.fit();
-                  requestAnimationFrame(() => {
-                    s.terminal.options.fontSize = origSize;
-                    s.fitAddon.fit();
-                    s.terminal.scrollToBottom();
+                  reflowTerminal(s, () => {
+                    snapToBottom(s);
                   });
                 } catch(_) {}
               }, 150);
@@ -2876,7 +2924,7 @@
 
       // Re-fit active terminal to the new visible area
       if (activeId && sessions[activeId]) {
-        setTimeout(() => sessions[activeId].fitAddon.fit(), 50);
+        setTimeout(() => fitAndKeepScroll(sessions[activeId]), 50);
       }
     }
 

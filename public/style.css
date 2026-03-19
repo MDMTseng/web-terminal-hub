@@ -651,6 +651,10 @@ html, body {
   display: none;
 }
 
+.vk-utility-spacer {
+  flex: 1;
+}
+
 .vk-row {
   display: flex;
   gap: 3px;
@@ -1237,6 +1241,7 @@ html, body {
     font-size: 10px;
     max-width: 60px;
   }
+
 }
 
 /* ========== Login Screen ========== */
@@ -2668,10 +2673,6 @@ html, body {
 .vk-files-btn:active {
   background: var(--yellow-warm);
   color: var(--bg-deep);
-}
-
-.vk-utility-spacer {
-  flex: 1;
 }
 
 /* ========== Image Preview Lightbox ========== */
