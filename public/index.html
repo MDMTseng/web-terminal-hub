@@ -2149,12 +2149,19 @@
 
       let touchStartY = 0;
       let lastY = 0;
+      let lastTime = 0;
+      let velocityY = 0;       // px/ms
       let scrolling = false;
+      let inertiaRAF = 0;
 
       container.addEventListener('touchstart', (e) => {
         if (e.touches.length === 1) {
+          // Stop any running inertia
+          if (inertiaRAF) { cancelAnimationFrame(inertiaRAF); inertiaRAF = 0; }
           touchStartY = e.touches[0].clientY;
           lastY = touchStartY;
+          lastTime = Date.now();
+          velocityY = 0;
           scrolling = false;
         }
       }, { passive: true });
@@ -2163,8 +2170,10 @@
         if (e.touches.length !== 1) return;
 
         const currentY = e.touches[0].clientY;
+        const now = Date.now();
         const deltaFromStart = Math.abs(currentY - touchStartY);
         const deltaFromLast = lastY - currentY;
+        const dt = now - lastTime || 1;
 
         // Once finger moves >8px, it's a scroll gesture — not a tap/select
         if (deltaFromStart > 8) {
@@ -2172,6 +2181,10 @@
         }
 
         if (scrolling) {
+          // Track velocity (exponential moving average for smoothness)
+          const instantV = deltaFromLast / dt;
+          velocityY = velocityY * 0.4 + instantV * 0.6;
+
           // Convert pixel delta to lines (roughly fontSize * 1.2 per line)
           const lineHeight = (term.options.fontSize || 13) * 1.2;
           const lines = Math.round(deltaFromLast / lineHeight);
@@ -2179,12 +2192,36 @@
             term.scrollLines(lines);
             lastY = currentY;
           }
+          lastTime = now;
           e.preventDefault();
         }
       }, { passive: false });
 
       container.addEventListener('touchend', () => {
+        if (!scrolling) return;
         scrolling = false;
+
+        // Inertia: carry momentum after finger lifts
+        const lineHeight = (term.options.fontSize || 13) * 1.2;
+        let v = velocityY;  // px/ms at release
+        const friction = 0.95;
+        let residual = 0;
+        let lastFrame = performance.now();
+
+        function inertiaStep(now) {
+          const frameDt = now - lastFrame;
+          lastFrame = now;
+          v *= Math.pow(friction, frameDt / 16);  // frame-rate independent damping
+          if (Math.abs(v) < 0.005) { inertiaRAF = 0; return; }
+          residual += v * frameDt;
+          const lines = Math.trunc(residual / lineHeight);
+          if (lines !== 0) {
+            term.scrollLines(lines);
+            residual -= lines * lineHeight;
+          }
+          inertiaRAF = requestAnimationFrame(inertiaStep);
+        }
+        inertiaRAF = requestAnimationFrame(inertiaStep);
       }, { passive: true });
     }
 
