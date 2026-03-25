@@ -32,19 +32,8 @@
       <div id="welcome" class="welcome-screen">
         <h1>Terminal Hub</h1>
         <p>Open a terminal session</p>
-        <div class="quick-launch">
-          <button onclick="pickShell('bash')">
-            <span class="ql-icon">$</span>
-            <span>Bash</span>
-          </button>
-          <button onclick="pickShell('powershell.exe')">
-            <span class="ql-icon">PS</span>
-            <span>PowerShell</span>
-          </button>
-          <button onclick="pickShell('cmd.exe')">
-            <span class="ql-icon">&gt;</span>
-            <span>CMD</span>
-          </button>
+        <div class="quick-launch" id="quick-launch-shells">
+          <!-- Populated dynamically based on server platform -->
         </div>
       </div>
     </div>
@@ -213,15 +202,9 @@
       <div class="modal-backdrop" onclick="closeShellModal()"></div>
       <div class="modal-content">
         <h3>New Terminal</h3>
-        <button class="modal-shell-btn" onclick="pickShell('bash')">
-          <span class="ql-icon">$</span> Bash
-        </button>
-        <button class="modal-shell-btn" onclick="pickShell('powershell.exe')">
-          <span class="ql-icon">PS</span> PowerShell
-        </button>
-        <button class="modal-shell-btn" onclick="pickShell('cmd.exe')">
-          <span class="ql-icon">&gt;</span> CMD
-        </button>
+        <div id="modal-shell-buttons">
+          <!-- Populated dynamically based on server platform -->
+        </div>
       </div>
     </div>
 
@@ -327,6 +310,53 @@
     const sessions = {};
     let activeId = null;
     const modifiers = { ctrl: false, alt: false, shift: false };
+
+    // ---- Platform detection ----
+    let serverPlatform = null;
+    let availableShells = [];
+    let defaultShell = 'bash';
+
+    async function fetchPlatform() {
+      try {
+        const resp = await authFetch('/api/platform');
+        const data = await resp.json();
+        serverPlatform = data.platform;
+        availableShells = data.shells || [];
+        defaultShell = availableShells.length > 0 ? availableShells[0].id : 'bash';
+        renderShellButtons();
+      } catch (_) {
+        // Fallback: show bash only
+        availableShells = [{ id: 'bash', label: 'Bash', icon: '$' }];
+        defaultShell = 'bash';
+        renderShellButtons();
+      }
+    }
+
+    function renderShellButtons() {
+      // Welcome screen quick-launch buttons
+      const welcomeContainer = document.getElementById('quick-launch-shells');
+      if (welcomeContainer) {
+        welcomeContainer.innerHTML = '';
+        for (const sh of availableShells) {
+          const btn = document.createElement('button');
+          btn.onclick = () => pickShell(sh.id);
+          btn.innerHTML = `<span class="ql-icon">${sh.icon === '>' ? '&gt;' : sh.icon}</span><span>${sh.label}</span>`;
+          welcomeContainer.appendChild(btn);
+        }
+      }
+      // Shell modal buttons
+      const modalContainer = document.getElementById('modal-shell-buttons');
+      if (modalContainer) {
+        modalContainer.innerHTML = '';
+        for (const sh of availableShells) {
+          const btn = document.createElement('button');
+          btn.className = 'modal-shell-btn';
+          btn.onclick = () => pickShell(sh.id);
+          btn.innerHTML = `<span class="ql-icon">${sh.icon === '>' ? '&gt;' : sh.icon}</span> ${sh.label}`;
+          modalContainer.appendChild(btn);
+        }
+      }
+    }
 
     // ---- Auth helpers ----
     function getToken() {
@@ -933,7 +963,7 @@
       }
       const cwd = currentFmPath;
       closeFileManager();
-      createTerminal('bash', cwd);
+      createTerminal(defaultShell, cwd);
     }
 
     // ---- File Manager: Delete ----
@@ -2228,7 +2258,7 @@
     // ---- Terminal management ----
 
     async function createTerminal(shell, cwd) {
-      if (!shell) shell = 'bash';
+      if (!shell) shell = defaultShell;
       showToast('Starting terminal...', 'info');
 
       const body = { shell, cols: 80, rows: 24 };
@@ -2612,6 +2642,8 @@
       if (s.includes('powershell')) return 'PS';
       if (s.includes('pwsh')) return 'pwsh';
       if (s.includes('cmd')) return 'CMD';
+      if (s.includes('zsh')) return 'Zsh';
+      if (s === 'sh') return 'sh';
       return 'Bash';
     }
     function setStatus(t) { document.getElementById('status-text').textContent = t; }
@@ -2972,6 +3004,7 @@
 
     // Auto-reconnect on page load
     loadGroupInfo();
+    fetchPlatform();
     reconnectExisting();
   </script>
 </body>

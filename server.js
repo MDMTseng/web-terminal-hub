@@ -569,8 +569,36 @@ async function resolveDirectory(inputPath) {
   }
 }
 
-// GET /api/fs/drives — list available drive letters (Windows)
+// GET /api/platform — return server OS platform and available shells
+app.get('/api/platform', (req, res) => {
+  const plat = process.platform; // 'win32', 'darwin', 'linux', etc.
+  let shells;
+  if (plat === 'win32') {
+    shells = [
+      { id: 'powershell', label: 'PowerShell', icon: 'PS' },
+      { id: 'cmd', label: 'CMD', icon: '>' },
+      { id: 'bash', label: 'Bash', icon: '$' }
+    ];
+  } else if (plat === 'darwin') {
+    shells = [
+      { id: 'zsh', label: 'Zsh', icon: '$' },
+      { id: 'bash', label: 'Bash', icon: '$' }
+    ];
+  } else {
+    shells = [
+      { id: 'bash', label: 'Bash', icon: '$' },
+      { id: 'zsh', label: 'Zsh', icon: '$' },
+      { id: 'sh', label: 'sh', icon: '$' }
+    ];
+  }
+  res.json({ platform: plat, shells });
+});
+
+// GET /api/fs/drives — list available drive letters (Windows only)
 app.get('/api/fs/drives', async (req, res) => {
+  if (process.platform !== 'win32') {
+    return res.json({ drives: [] });
+  }
   const checks = [];
   for (let i = 'A'.charCodeAt(0); i <= 'Z'.charCodeAt(0); i++) {
     const drivePath = String.fromCharCode(i) + ':\\';
@@ -1220,17 +1248,34 @@ app.post('/api/terminal/new', async (req, res) => {
     if (resolved) cwd = resolved;
   }
 
-  // node-pty on Windows needs full paths
+  // Resolve shell command based on platform
   let shellCmd, shellLabel;
-  if (shell === 'powershell.exe' || shell === 'powershell') {
-    shellCmd = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
-    shellLabel = 'powershell';
-  } else if (shell === 'cmd.exe' || shell === 'cmd') {
-    shellCmd = 'C:\\Windows\\System32\\cmd.exe';
-    shellLabel = 'cmd';
+  const isWin = process.platform === 'win32';
+
+  if (isWin) {
+    // Windows: node-pty needs full paths
+    if (shell === 'powershell.exe' || shell === 'powershell') {
+      shellCmd = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+      shellLabel = 'powershell';
+    } else if (shell === 'cmd.exe' || shell === 'cmd') {
+      shellCmd = 'C:\\Windows\\System32\\cmd.exe';
+      shellLabel = 'cmd';
+    } else {
+      shellCmd = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
+      shellLabel = 'bash';
+    }
   } else {
-    shellCmd = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
-    shellLabel = 'bash';
+    // macOS / Linux: use standard shell paths
+    if (shell === 'zsh') {
+      shellCmd = '/bin/zsh';
+      shellLabel = 'zsh';
+    } else if (shell === 'sh') {
+      shellCmd = '/bin/sh';
+      shellLabel = 'sh';
+    } else {
+      shellCmd = '/bin/bash';
+      shellLabel = 'bash';
+    }
   }
 
   log.info('pty', `Creating terminal ${id} for group "${group}": ${shellCmd} (${cols}x${rows}) cwd=${cwd}`);
