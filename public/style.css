@@ -500,39 +500,6 @@ html, body {
   color: #fff;
 }
 
-/* ---- Utility row (zoom controls, always visible when expanded) ---- */
-.vk-utility-row {
-  border-top: 1px solid var(--border-subtle);
-  margin-top: 2px;
-  padding-top: 4px;
-  justify-content: center;
-  align-items: center;
-  gap: 8px;
-}
-
-.vk-util {
-  background: var(--bg-base);
-  color: var(--text-secondary);
-  border-color: var(--border-mid);
-  max-width: 48px;
-  font-size: 13px;
-  font-weight: 700;
-  flex: 0 0 auto;
-}
-
-.vk-util:active {
-  background: var(--border-mid);
-  color: var(--text-bright);
-}
-
-.vk-zoom-label {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-weight: 600;
-  min-width: 36px;
-  text-align: center;
-}
-
 /* ---- Links badge on mode button ---- */
 .vk-links-badge {
   display: inline-flex;
@@ -649,10 +616,6 @@ html, body {
 
 .vk-expanded.hidden {
   display: none;
-}
-
-.vk-utility-spacer {
-  flex: 1;
 }
 
 .vk-row {
@@ -793,40 +756,104 @@ html, body {
   justify-content: center;
 }
 
-/* ========== Status bar ========== */
+/* ========== Status bar (footer, single row) ========== */
 #statusbar {
   background: var(--bg-panel);
-  padding: 4px 10px;
+  padding: 4px 8px;
   font-size: 11px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
+  flex-wrap: nowrap;
   color: var(--text-secondary);
   flex-shrink: 0;
-  min-height: 28px;
+  min-height: 32px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
 
-#status-text {
-  transition: opacity var(--dur-normal);
+#statusbar::-webkit-scrollbar {
+  display: none;
 }
 
-#vk-toggle-btn {
-  background: none;
-  border: 1px solid var(--text-secondary);
+#statusbar #group-badge {
+  flex-shrink: 0;
+}
+
+/* Segmented − | 11px | + */
+.statusbar-zoom {
+  display: inline-flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  border: 1px solid var(--border-mid);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--bg-base);
+}
+
+.statusbar-zoom-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  width: 30px;
+  min-height: 26px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  padding: 0;
+}
+
+.statusbar-zoom-btn:active {
+  background: var(--border-mid);
+  color: var(--text-bright);
+}
+
+.statusbar-zoom-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  min-width: 38px;
+  padding: 0 4px;
+  border-left: 1px solid var(--border-mid);
+  border-right: 1px solid var(--border-mid);
+}
+
+.statusbar-footer-btn {
+  flex-shrink: 0;
+  background: var(--bg-base);
+  border: 1px solid var(--border-mid);
   color: var(--text-secondary);
   border-radius: var(--r-sm);
-  padding: 2px 8px;
-  font-size: 14px;
+  padding: 2px 10px;
+  min-height: 26px;
+  font-size: 11px;
+  font-weight: 600;
   cursor: pointer;
-}
-#vk-toggle-btn:active {
-  background: var(--accent);
-  color: var(--bg-deep);
-  border-color: var(--accent);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  white-space: nowrap;
 }
 
-#terminal-count {
-  color: var(--accent);
+.statusbar-footer-btn:active {
+  background: var(--border-mid);
+  color: var(--text-bright);
+}
+
+.statusbar-files-btn {
+  background: var(--blue-bg);
+  color: var(--yellow-warm);
+  border-color: var(--yellow-bg);
+}
+
+.statusbar-files-btn:active {
+  background: var(--yellow-warm);
+  color: var(--bg-deep);
 }
 
 /* ========== Shell Modal (animated) ========== */
@@ -1557,7 +1584,6 @@ html, body {
 #group-badge {
   font-weight: 600;
   font-size: 12px;
-  margin-right: 8px;
   padding: 2px 8px;
   background: var(--accent-dim);
   border-radius: var(--r-sm);
@@ -1572,7 +1598,6 @@ html, body {
   padding: 2px 8px;
   font-size: 11px;
   cursor: pointer;
-  margin-left: 4px;
 }
 
 #switch-group-btn:active {
@@ -2659,22 +2684,6 @@ html, body {
   flex: 1;
 }
 
-/* File manager button on virtual keyboard */
-.vk-files-btn {
-  background: var(--blue-bg);
-  color: var(--yellow-warm);
-  border-color: var(--yellow-bg);
-  max-width: 80px;
-  font-size: 12px;
-  font-weight: 600;
-  gap: 4px;
-}
-
-.vk-files-btn:active {
-  background: var(--yellow-warm);
-  color: var(--bg-deep);
-}
-
 /* ========== Image Preview Lightbox ========== */
 .image-preview-content {
   width: 100vw;
@@ -3086,4 +3095,46 @@ html, body {
 @keyframes toastOut {
   from { opacity: 1; transform: translateY(0); }
   to { opacity: 0; transform: translateY(-12px); }
+}
+
+/* Connection toasts: compact pill above footer */
+#toast-container-connection {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  max-width: 92vw;
+}
+
+.toast.toast-connection {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  max-width: min(92vw, 280px);
+  white-space: normal;
+  text-align: center;
+  animation: toastInConnection 0.2s ease-out;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.toast-connection.toast-out {
+  animation: toastOutConnection 0.18s ease-in forwards;
+}
+
+@keyframes toastInConnection {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toastOutConnection {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(6px); }
 }

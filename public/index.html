@@ -15,8 +15,10 @@
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-canvas@0.5.0/lib/xterm-addon-canvas.min.js"></script>
 </head>
 <body>
-  <!-- Toast notification container -->
+  <!-- Toast notification container (general — top) -->
   <div id="toast-container"></div>
+  <!-- Connection status toasts: compact, bottom -->
+  <div id="toast-container-connection"></div>
 
   <div id="app">
     <!-- Top bar with tabs -->
@@ -144,25 +146,19 @@
             <div class="links-panel-empty">No links captured yet. URLs and file paths from terminal output will appear here.</div>
           </div>
         </div>
-
-        <!-- ===== Utility row (always visible when expanded) ===== -->
-        <div class="vk-row vk-utility-row">
-          <button class="vk-key vk-util" id="vk-zoom-down" title="Smaller font">A−</button>
-          <span class="vk-zoom-label" id="vk-zoom-label">11px</span>
-          <button class="vk-key vk-util" id="vk-zoom-up" title="Larger font">A+</button>
-          <span class="vk-utility-spacer"></span>
-          <button class="vk-key vk-files-btn" id="vk-files-btn" title="File Manager">📁 Files</button>
-        </div>
       </div>
     </div>
 
-    <!-- Status bar -->
+    <!-- Status bar (footer): one row — group, font size, files, groups -->
     <div id="statusbar">
       <span id="group-badge"></span>
-      <span id="status-text">Ready</span>
-      <button id="vk-toggle-btn" title="Toggle virtual keyboard">⌨</button>
-      <button id="switch-group-btn" title="Switch group">⇄ Groups</button>
-      <span id="terminal-count">0 terminals</span>
+      <div class="statusbar-zoom" title="Font size">
+        <button type="button" class="statusbar-zoom-btn" id="vk-zoom-down" title="Smaller">−</button>
+        <span class="statusbar-zoom-label" id="vk-zoom-label">11px</span>
+        <button type="button" class="statusbar-zoom-btn" id="vk-zoom-up" title="Larger">+</button>
+      </div>
+      <button type="button" class="statusbar-footer-btn statusbar-files-btn" id="vk-files-btn" title="File Manager">📁 Files</button>
+      <button type="button" class="statusbar-footer-btn" id="switch-group-btn" title="Switch group">⇄ Groups</button>
     </div>
 
     <!-- Text input modal (for iOS voice / IME input + image attach) -->
@@ -1477,16 +1473,6 @@
       document.querySelectorAll('.vk-toggle').forEach(b => b.classList.remove('vk-active'));
     }
 
-    // Toggle virtual keyboard visibility (whole bar)
-    let vkVisible = true;
-    document.getElementById('vk-toggle-btn').addEventListener('click', () => {
-      vkVisible = !vkVisible;
-      document.getElementById('vkeyboard').style.display = vkVisible ? 'flex' : 'none';
-      if (activeId && sessions[activeId]) {
-        setTimeout(() => fitAndKeepScroll(sessions[activeId]), 100);
-      }
-    });
-
     // Expand/collapse extra rows
     let vkExpanded = false;
     const VK_MODES = ['claude', 'shell', 'links'];
@@ -1956,8 +1942,8 @@
 
     // ---- Zoom: step font sizes ----
     const ZOOM_LEVELS = [9, 11, 13, 16, 20];
-    // Default: 9px for all devices
-    let zoomIndex = 0;
+    // Default: 11px for all devices
+    let zoomIndex = 1;
 
     function applyZoom() {
       const size = ZOOM_LEVELS[zoomIndex];
@@ -2646,13 +2632,14 @@
       if (s === 'sh') return 'sh';
       return 'Bash';
     }
-    function setStatus(t) { document.getElementById('status-text').textContent = t; }
+    function setStatus(_t) { /* footer no longer shows status line */ }
 
-    // Toast notification system
-    function showToast(message, type = 'info', duration = 2500) {
-      const container = document.getElementById('toast-container');
+    // Toast notification system (optional 4th arg: { connection: true } → small bubble above footer)
+    function showToast(message, type = 'info', duration = 2500, opts = null) {
+      const connection = opts && opts.connection === true;
+      const container = document.getElementById(connection ? 'toast-container-connection' : 'toast-container');
       const toast = document.createElement('div');
-      toast.className = `toast toast-${type}`;
+      toast.className = `toast toast-${type}${connection ? ' toast-connection' : ''}`;
       toast.textContent = message;
       container.appendChild(toast);
 
@@ -2675,8 +2662,7 @@
     }
 
     function updateCount() {
-      const c = Object.keys(sessions).length;
-      document.getElementById('terminal-count').textContent = c === 1 ? '1 term' : `${c} terms`;
+      /* terminal count removed from footer */
     }
 
     // Re-fit all on window resize
@@ -2705,7 +2691,7 @@
 
         if (list.length === 0) return;
 
-        showToast(`Reconnecting to ${list.length} terminal(s)...`, 'info');
+        showToast(`Reconnecting to ${list.length} terminal(s)...`, 'info', 2500, { connection: true });
         document.getElementById('welcome').style.display = 'none';
 
         for (const t of list) {
@@ -2713,7 +2699,7 @@
         }
 
         updateCount();
-        showToast('Reconnected', 'success');
+        showToast('Reconnected', 'success', 2000, { connection: true });
       } catch (err) {
         console.error('Reconnect failed:', err);
       }
@@ -2803,7 +2789,7 @@
 
       ws.onopen = () => {
         setStatus(`Terminal #${id} connected`);
-        showToast(`Terminal #${id} connected`, 'success', 1500);
+        showToast(`Terminal #${id} connected`, 'success', 1500, { connection: true });
         hideReconnectOverlay(id);
         s.tab.classList.remove('tab-disconnected');
         // On reconnect: clear terminal so buffered replay doesn't double up
@@ -2852,7 +2838,7 @@
         if (s._kicked || s._closing) return; // don't reconnect if kicked or intentionally closed
         s.tab.classList.add('tab-disconnected');
         setStatus('Disconnected');
-        showToast('Disconnected', 'warning');
+        showToast('Disconnected', 'warning', 2200, { connection: true });
         showReconnectOverlay(id);
         // Auto-retry after 3s
         s._reconnectTimer = setTimeout(() => {
@@ -2932,7 +2918,7 @@
     }
 
     function reconnectAll() {
-      showToast('Reconnecting...', 'info');
+      showToast('Reconnecting...', 'info', 2500, { connection: true });
       for (const [id, s] of Object.entries(sessions)) {
         if (s.type === 'file') continue; // skip file viewers
         if (s._reconnectTimer) clearTimeout(s._reconnectTimer);
@@ -2982,24 +2968,40 @@
     });
 
     // ---- Mobile keyboard: keep virtual keyboard visible above phone keyboard ----
+    // visualViewport's "scroll" fires very often on iOS (URL bar, rubber-band) even when
+    // width/height/offset barely change. Re-fitting + scrollToBottom each time caused the
+    // terminal to jump. Only react when layout actually moves or resizes, and debounce fit.
+    let _vvLastTop = null;
+    let _vvLastHeight = null;
+    let _vvFitTimer = null;
+
     function handleViewportResize() {
       const vv = window.visualViewport;
       if (!vv) return;
 
+      const top = Math.round(vv.offsetTop);
+      const h = Math.round(vv.height);
+      if (_vvLastTop === top && _vvLastHeight === h) return;
+      _vvLastTop = top;
+      _vvLastHeight = h;
+
       const app = document.getElementById('app');
-      // Position #app to match the visible viewport exactly
       app.style.top = vv.offsetTop + 'px';
       app.style.height = vv.height + 'px';
 
-      // Re-fit active terminal to the new visible area
       if (activeId && sessions[activeId]) {
-        setTimeout(() => fitAndKeepScroll(sessions[activeId]), 50);
+        if (_vvFitTimer) clearTimeout(_vvFitTimer);
+        _vvFitTimer = setTimeout(() => {
+          _vvFitTimer = null;
+          fitAndKeepScroll(sessions[activeId]);
+        }, 80);
       }
     }
 
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleViewportResize);
       window.visualViewport.addEventListener('scroll', handleViewportResize);
+      handleViewportResize();
     }
 
     // Auto-reconnect on page load
