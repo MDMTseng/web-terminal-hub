@@ -233,31 +233,29 @@ html, body {
   color: var(--bg-deep);
 }
 
-.tab-disconnected {
-  opacity: 0.6;
-}
+/* Connected (inactive): icon uses accent — default .tab-icon above */
 
+/* Disconnected: muted tab icon + small indicator dot */
 .tab-disconnected .tab-icon {
-  background: var(--red-dark);
-  color: var(--red-light);
+  background: var(--border-mid);
+  color: var(--text-dim);
 }
 
-/* Pulsing red dot on disconnected tabs */
+.tab.active.tab-disconnected .tab-icon {
+  background: #3d4f63;
+  color: var(--text-muted);
+}
+
 .tab-disconnected::before {
   content: '';
   position: absolute;
   top: 6px;
   right: 6px;
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: var(--red);
-  animation: tabPulse 1.5s ease-in-out infinite;
-}
-
-@keyframes tabPulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
-  50% { opacity: 0.5; box-shadow: 0 0 4px 2px rgba(239, 68, 68, 0.3); }
+  background: var(--text-dim);
+  opacity: 0.85;
 }
 
 /* ========== Reconnect Banner ========== */
@@ -358,6 +356,13 @@ html, body {
 
 .terminal-container .xterm {
   height: 100%;
+}
+
+/* Offline / reconnecting: gray out terminal (overlay stays full-color) */
+.terminal-container.terminal-disconnected > .xterm {
+  filter: grayscale(0.88) brightness(0.62);
+  opacity: 0.78;
+  transition: filter 0.25s ease, opacity 0.25s ease;
 }
 
 /* ========== Virtual Keyboard ========== */
@@ -3095,46 +3100,4 @@ html, body {
 @keyframes toastOut {
   from { opacity: 1; transform: translateY(0); }
   to { opacity: 0; transform: translateY(-12px); }
-}
-
-/* Connection toasts: compact pill above footer */
-#toast-container-connection {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: calc(48px + env(safe-area-inset-bottom, 0px));
-  z-index: var(--z-toast);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  pointer-events: none;
-  max-width: 92vw;
-}
-
-.toast.toast-connection {
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.35;
-  max-width: min(92vw, 280px);
-  white-space: normal;
-  text-align: center;
-  animation: toastInConnection 0.2s ease-out;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-}
-
-.toast-connection.toast-out {
-  animation: toastOutConnection 0.18s ease-in forwards;
-}
-
-@keyframes toastInConnection {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes toastOutConnection {
-  from { opacity: 1; transform: translateY(0); }
-  to { opacity: 0; transform: translateY(6px); }
 }

@@ -15,10 +15,8 @@
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-canvas@0.5.0/lib/xterm-addon-canvas.min.js"></script>
 </head>
 <body>
-  <!-- Toast notification container (general — top) -->
+  <!-- Toast notification container -->
   <div id="toast-container"></div>
-  <!-- Connection status toasts: compact, bottom -->
-  <div id="toast-container-connection"></div>
 
   <div id="app">
     <!-- Top bar with tabs -->
@@ -2318,6 +2316,8 @@
 
         sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null, cwd: cwd || '', renderer };
         initScrollTracking(sessions[id]);
+        tabEl.classList.add('tab-disconnected');
+        container.classList.add('terminal-disconnected');
         connectWs(id);
 
         term.onData((data) => {
@@ -2634,12 +2634,11 @@
     }
     function setStatus(_t) { /* footer no longer shows status line */ }
 
-    // Toast notification system (optional 4th arg: { connection: true } → small bubble above footer)
-    function showToast(message, type = 'info', duration = 2500, opts = null) {
-      const connection = opts && opts.connection === true;
-      const container = document.getElementById(connection ? 'toast-container-connection' : 'toast-container');
+    // Toast notification system
+    function showToast(message, type = 'info', duration = 2500) {
+      const container = document.getElementById('toast-container');
       const toast = document.createElement('div');
-      toast.className = `toast toast-${type}${connection ? ' toast-connection' : ''}`;
+      toast.className = `toast toast-${type}`;
       toast.textContent = message;
       container.appendChild(toast);
 
@@ -2691,7 +2690,6 @@
 
         if (list.length === 0) return;
 
-        showToast(`Reconnecting to ${list.length} terminal(s)...`, 'info', 2500, { connection: true });
         document.getElementById('welcome').style.display = 'none';
 
         for (const t of list) {
@@ -2699,7 +2697,6 @@
         }
 
         updateCount();
-        showToast('Reconnected', 'success', 2000, { connection: true });
       } catch (err) {
         console.error('Reconnect failed:', err);
       }
@@ -2754,6 +2751,8 @@
 
       sessions[id] = { tab: tabEl, container, terminal: term, fitAddon, ws: null, cwd: '', renderer };
       initScrollTracking(sessions[id]);
+      tabEl.classList.add('tab-disconnected');
+      container.classList.add('terminal-disconnected');
       connectWs(id);
 
       term.onData((data) => {
@@ -2775,7 +2774,7 @@
     // ---- WebSocket connect/reconnect ----
     function connectWs(id) {
       const s = sessions[id];
-      if (!s) return;
+      if (!s || s.type === 'file') return;
 
       // Close old socket if any
       if (s.ws) {
@@ -2788,10 +2787,9 @@
       s._kicked = false;
 
       ws.onopen = () => {
-        setStatus(`Terminal #${id} connected`);
-        showToast(`Terminal #${id} connected`, 'success', 1500, { connection: true });
-        hideReconnectOverlay(id);
         s.tab.classList.remove('tab-disconnected');
+        s.container.classList.remove('terminal-disconnected');
+        hideReconnectOverlay(id);
         // On reconnect: clear terminal so buffered replay doesn't double up
         s.terminal.clear();
         // Re-fit and send correct dimensions
@@ -2836,9 +2834,9 @@
 
       ws.onclose = () => {
         if (s._kicked || s._closing) return; // don't reconnect if kicked or intentionally closed
+        if (s.ws !== ws) return; // replaced by a newer socket (reconnect race)
         s.tab.classList.add('tab-disconnected');
-        setStatus('Disconnected');
-        showToast('Disconnected', 'warning', 2200, { connection: true });
+        s.container.classList.add('terminal-disconnected');
         showReconnectOverlay(id);
         // Auto-retry after 3s
         s._reconnectTimer = setTimeout(() => {
@@ -2918,7 +2916,6 @@
     }
 
     function reconnectAll() {
-      showToast('Reconnecting...', 'info', 2500, { connection: true });
       for (const [id, s] of Object.entries(sessions)) {
         if (s.type === 'file') continue; // skip file viewers
         if (s._reconnectTimer) clearTimeout(s._reconnectTimer);
