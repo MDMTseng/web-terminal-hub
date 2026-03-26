@@ -338,10 +338,13 @@ html, body {
 
 /* ========== Terminal area ========== */
 #terminal-area {
-  flex: 1;
+  flex: 1 1 0%;
   position: relative;
   background: var(--bg-deep);
   min-height: 0; /* important for flex shrink */
+  /* When the keypad expands, #vkeyboard used to stay flex-shrink:0 and eat all height —
+     terminal flex item collapsed to ~0 (blank xterm). Keep a visible floor. */
+  min-height: max(72px, 14vh);
 }
 
 .terminal-container {
@@ -369,7 +372,9 @@ html, body {
 #vkeyboard {
   background: var(--bg-kbd);
   border-top: 1px solid var(--border-subtle);
-  flex-shrink: 0;
+  /* Must be allowed to shrink when expanded rows are open; otherwise terminal area goes to 0 height. */
+  flex-shrink: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -379,6 +384,7 @@ html, body {
 
 /* Compact bar — always visible, single row */
 .vk-compact-bar {
+  flex-shrink: 0;
   gap: 6px;
   padding: 0 4px;
 }
@@ -446,6 +452,13 @@ html, body {
   padding-top: 3px;
   border-top: 1px solid var(--border-subtle);
   margin-top: 2px;
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Cap height so extra keys scroll inside the keypad instead of stealing the terminal. */
+  max-height: min(38vh, 300px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ---- Mode toggle (Shell / Claude) ---- */
