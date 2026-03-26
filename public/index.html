@@ -89,6 +89,11 @@
 
         <!-- ===== Shell Keys ===== -->
         <div id="vk-shell-keys" class="hidden">
+          <div class="vk-shell-scrollback" title="Max scrollback lines (lower = faster after app switch)">
+            <span class="vk-shell-scrollback-label">Buf</span>
+            <input type="range" id="termhub-scrollback-range" min="10" max="1000" step="10" />
+            <span class="vk-shell-scrollback-value" id="termhub-scrollback-value">300</span>
+          </div>
           <!-- Row 1: modifier toggles -->
           <div class="vk-row vk-modifiers">
             <button class="vk-key vk-toggle" data-mod="ctrl" id="vk-ctrl">Ctrl</button>
@@ -1938,6 +1943,30 @@
       selectionBackground: '#1f4068'
     };
 
+    const SCROLLBACK_STORAGE_KEY = 'termhub_scrollback_lines';
+    const SCROLLBACK_MIN = 10;
+    const SCROLLBACK_MAX = 1000;
+    const SCROLLBACK_DEFAULT = 300;
+
+    function getScrollbackLines() {
+      const raw = parseInt(localStorage.getItem(SCROLLBACK_STORAGE_KEY), 10);
+      const n = Number.isFinite(raw) ? raw : SCROLLBACK_DEFAULT;
+      return Math.min(SCROLLBACK_MAX, Math.max(SCROLLBACK_MIN, n));
+    }
+
+    function applyScrollbackToAllTerminals() {
+      const n = getScrollbackLines();
+      for (const s of Object.values(sessions)) {
+        if (s.terminal) s.terminal.options.scrollback = n;
+      }
+    }
+
+    function setScrollbackLines(n) {
+      n = Math.min(SCROLLBACK_MAX, Math.max(SCROLLBACK_MIN, parseInt(n, 10) || SCROLLBACK_DEFAULT));
+      localStorage.setItem(SCROLLBACK_STORAGE_KEY, String(n));
+      applyScrollbackToAllTerminals();
+    }
+
     // ---- Zoom: step font sizes ----
     const ZOOM_LEVELS = [9, 11, 13, 16, 20];
     // Default: 11px for all devices
@@ -1965,6 +1994,22 @@
 
     // Initialize zoom label
     document.getElementById('vk-zoom-label').textContent = ZOOM_LEVELS[zoomIndex] + 'px';
+
+    (function initScrollbackUI() {
+      const range = document.getElementById('termhub-scrollback-range');
+      const valEl = document.getElementById('termhub-scrollback-value');
+      if (!range || !valEl) return;
+      let v = getScrollbackLines();
+      const snapped = Math.min(SCROLLBACK_MAX, Math.max(SCROLLBACK_MIN, Math.round(v / 10) * 10));
+      if (snapped !== v) setScrollbackLines(snapped);
+      v = getScrollbackLines();
+      range.value = String(v);
+      valEl.textContent = String(v);
+      range.addEventListener('input', () => { valEl.textContent = range.value; });
+      range.addEventListener('change', () => {
+        setScrollbackLines(parseInt(range.value, 10));
+      });
+    })();
 
     // ---- Pinch-to-zoom on terminal area ----
     (function setupPinchZoom() {
@@ -2297,7 +2342,7 @@
           fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
           theme: TERMINAL_THEME,
           allowProposedApi: true,
-          scrollback: 5000,
+          scrollback: getScrollbackLines(),
           scrollSensitivity: 3,
           fastScrollSensitivity: 10
         });
@@ -2732,7 +2777,7 @@
         fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
         theme: TERMINAL_THEME,
         allowProposedApi: true,
-        scrollback: 5000,
+        scrollback: getScrollbackLines(),
         scrollSensitivity: 3,
         fastScrollSensitivity: 10
       });
