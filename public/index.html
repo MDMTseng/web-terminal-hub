@@ -2069,6 +2069,14 @@
     // New output and fit() should snap to bottom UNLESS the user scrolled up.
     // We detect "user scrolled up" via the onScroll event and reset it when
     // new output arrives (onData from server pushes viewportY back to baseY).
+    function isAlternateScreenTerminal(term) {
+      try {
+        return term && term.buffer && term.buffer.active && term.buffer.active.type === 'alternate';
+      } catch (_) {
+        return false;
+      }
+    }
+
     function initScrollTracking(s) {
       s._userScrolledUp = false;
       s._suppressScrollTrack = false;
@@ -2076,6 +2084,9 @@
       // When the viewport scrolls, check if user is NOT at bottom
       s.terminal.onScroll(() => {
         if (s._suppressScrollTrack) return;
+        // Full-screen TUIs (Claude Code, Cursor CLI, vim) use the alternate buffer; onScroll
+        // fires constantly during redraws and would flip _userScrolledUp / fight scrollToBottom.
+        if (isAlternateScreenTerminal(s.terminal)) return;
         const buf = s.terminal.buffer.active;
         s._userScrolledUp = buf.viewportY < buf.baseY;
       });
@@ -2083,35 +2094,32 @@
 
     // Snap terminal to bottom, suppressing scroll tracking so the snap
     // itself doesn't get misread as "user scrolled up".
+    // Single scrollToBottom — chaining multiple snaps caused visible "crazy scroll" on large buffers.
     function snapToBottom(s) {
       if (!s || !s.terminal) return;
       s._suppressScrollTrack = true;
       s._userScrolledUp = false;
       s.terminal.scrollToBottom();
-      // Release suppression after xterm settles
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => { s._suppressScrollTrack = false; });
+        s._suppressScrollTrack = false;
       });
     }
 
     // ---- Fit terminal and preserve scroll position ----
     // After fit(), xterm reflows and may reset scroll to top.
     // If user was at bottom (not manually scrolled up), snap back.
+    // Never auto snap on the alternate screen — the app owns the viewport (TUI redraws).
     function fitAndKeepScroll(s) {
       if (!s || !s.terminal || !s.fitAddon) return;
-      const shouldSnap = !s._userScrolledUp;
+      const shouldSnap = !s._userScrolledUp && !isAlternateScreenTerminal(s.terminal);
       s._suppressScrollTrack = true;
       s.fitAddon.fit();
       if (shouldSnap) {
         s.terminal.scrollToBottom();
       }
-      // xterm may do additional async layout — re-snap after it settles
       requestAnimationFrame(() => {
         if (shouldSnap) s.terminal.scrollToBottom();
-        requestAnimationFrame(() => {
-          if (shouldSnap) s.terminal.scrollToBottom();
-          s._suppressScrollTrack = false;
-        });
+        s._suppressScrollTrack = false;
       });
     }
 
@@ -2120,7 +2128,7 @@
     // argument runs after the final fit() completes.
     function reflowTerminal(s, callback) {
       if (!s || !s.terminal || !s.fitAddon) return;
-      const shouldSnap = !s._userScrolledUp;
+      const shouldSnap = !s._userScrolledUp && !isAlternateScreenTerminal(s.terminal);
       s._suppressScrollTrack = true;
       const origSize = s.terminal.options.fontSize;
       s.terminal.options.fontSize = origSize + 1;
@@ -2150,7 +2158,7 @@
               t.refresh(0, last);
             }
           } catch (_) {}
-          snapToBottom(s);
+          if (!isAlternateScreenTerminal(s.terminal)) snapToBottom(s);
         });
       });
     }
@@ -2161,16 +2169,27 @@
       reflowTerminal(s);
     }
 
-    // ---- Scroll to bottom + reflow ----
+    // ---- Scroll to bottom (⤓) — light path; reflowTerminal + double snap was janky on busy buffers ----
     document.getElementById('vk-scroll-btn').addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
       if (activeId && sessions[activeId] && sessions[activeId].terminal) {
         const s = sessions[activeId];
-        // Reset scroll tracking and snap to bottom after reflow completes
         s._userScrolledUp = false;
-        reflowTerminal(s, () => {
-          snapToBottom(s);
-        });
+        if (isAlternateScreenTerminal(s.terminal)) {
+          try { s.fitAddon.fit(); } catch (_) {}
+        } else {
+          s._suppressScrollTrack = true;
+          try { s.fitAddon.fit(); } catch (_) {}
+          s.terminal.scrollToBottom();
+          requestAnimationFrame(() => {
+            try {
+              const t = s.terminal;
+              const last = t.rows - 1;
+              if (typeof t.refresh === 'function' && last >= 0) t.refresh(0, last);
+            } catch (_) {}
+            s._suppressScrollTrack = false;
+          });
+        }
         s.terminal.focus();
       }
     });
