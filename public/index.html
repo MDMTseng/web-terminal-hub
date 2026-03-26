@@ -2134,6 +2134,27 @@
       });
     }
 
+    // After WS reconnect the server replays outputBuffer in one output message (see server.js).
+    // reflowTerminal() (font toggle + 2× fit) forced a huge buffer reflow and brutal scroll-to-bottom
+    // on phones. Light refit + refresh + snap is enough for most cases; tap ⤓ if WebGL looks wrong.
+    function afterReconnectReplay(s) {
+      if (!s || !s.terminal || !s.fitAddon) return;
+      s._userScrolledUp = false;
+      fitAndKeepScroll(s);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          try {
+            const t = s.terminal;
+            const last = t.rows - 1;
+            if (typeof t.refresh === 'function' && last >= 0) {
+              t.refresh(0, last);
+            }
+          } catch (_) {}
+          snapToBottom(s);
+        });
+      });
+    }
+
     // Legacy wrapper for active terminal
     function reflowActiveTerminal() {
       const s = sessions[activeId];
@@ -2846,15 +2867,13 @@
           if (msg.type === 'output') {
             s.terminal.write(msg.data);
             scanOutputForLinks(msg.data);
-            // After reconnect buffer replay, reflow the terminal to fix garbled display
+            // After reconnect buffer replay — avoid heavy reflowTerminal (see afterReconnectReplay)
             if (s._reconnecting) {
               s._reconnecting = false;
               setTimeout(() => {
                 try {
-                  reflowTerminal(s, () => {
-                    snapToBottom(s);
-                  });
-                } catch(_) {}
+                  afterReconnectReplay(s);
+                } catch (_) {}
               }, 150);
             }
           } else if (msg.type === 'exit') {
@@ -2979,7 +2998,7 @@
           if (!anyDead) hideReconnectBanner();
           // Light refit only. Heavy reflowTerminal() (font toggle + 2× fit) was resetting
           // scroll to top then stepping to bottom — very slow with large scrollback on mobile.
-          // Full reflow remains on the ⤓ scroll button and after reconnect buffer replay.
+          // Heavy reflow (⤓) only if needed; reconnect uses light afterReconnectReplay.
           if (activeId && sessions[activeId] && sessions[activeId].terminal) {
             fitAndKeepScroll(sessions[activeId]);
           }
