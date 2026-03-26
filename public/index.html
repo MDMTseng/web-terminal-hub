@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <title>Terminal Hub</title>
@@ -2709,13 +2709,6 @@
       /* terminal count removed from footer */
     }
 
-    // Re-fit all on window resize
-    window.addEventListener('resize', () => {
-      if (activeId && sessions[activeId]) {
-        fitAndKeepScroll(sessions[activeId]);
-      }
-    });
-
     // + button opens shell picker
     document.getElementById('new-tab-btn').addEventListener('click', openShellModal);
 
@@ -2984,8 +2977,12 @@
             }
           }
           if (!anyDead) hideReconnectBanner();
-          // Reflow active terminal to fix garbled display after background
-          reflowActiveTerminal();
+          // Light refit only. Heavy reflowTerminal() (font toggle + 2× fit) was resetting
+          // scroll to top then stepping to bottom — very slow with large scrollback on mobile.
+          // Full reflow remains on the ⤓ scroll button and after reconnect buffer replay.
+          if (activeId && sessions[activeId] && sessions[activeId].terminal) {
+            fitAndKeepScroll(sessions[activeId]);
+          }
         }, 500);
       }
     });
@@ -3009,13 +3006,24 @@
       window.location.href = '/welcome';
     });
 
-    // ---- Mobile keyboard: keep virtual keyboard visible above phone keyboard ----
-    // visualViewport's "scroll" fires very often on iOS (URL bar, rubber-band) even when
-    // width/height/offset barely change. Re-fitting + scrollToBottom each time caused the
-    // terminal to jump. Only react when layout actually moves or resizes, and debounce fit.
+    // ---- Mobile: #app vs system keyboard (visualViewport) ----
+    // The OS resizes or shifts the layout when the IME opens. We also size #app from
+    // visualViewport — that is correct, but (1) window "resize" often fires in the same
+    // frame and used to call fit() separately, stacking with this path; (2) height must
+    // stay within layout viewport bounds or you get an extra blank band ("double" inset).
+    // interactive-widget=resizes-content (viewport meta) aligns Chrome with a resized layout.
     let _vvLastTop = null;
     let _vvLastHeight = null;
     let _vvFitTimer = null;
+
+    function scheduleViewportFit() {
+      if (!(activeId && sessions[activeId])) return;
+      if (_vvFitTimer) clearTimeout(_vvFitTimer);
+      _vvFitTimer = setTimeout(() => {
+        _vvFitTimer = null;
+        fitAndKeepScroll(sessions[activeId]);
+      }, 80);
+    }
 
     function handleViewportResize() {
       const vv = window.visualViewport;
@@ -3028,23 +3036,44 @@
       _vvLastHeight = h;
 
       const app = document.getElementById('app');
-      app.style.top = vv.offsetTop + 'px';
-      app.style.height = vv.height + 'px';
+      const innerH = typeof window.innerHeight === 'number' ? window.innerHeight : h;
+      const maxH = Math.max(0, innerH - top);
+      const clampedH = Math.min(h, maxH);
 
-      if (activeId && sessions[activeId]) {
-        if (_vvFitTimer) clearTimeout(_vvFitTimer);
-        _vvFitTimer = setTimeout(() => {
-          _vvFitTimer = null;
-          fitAndKeepScroll(sessions[activeId]);
-        }, 80);
-      }
+      app.style.top = vv.offsetTop + 'px';
+      app.style.height = clampedH + 'px';
+
+      scheduleViewportFit();
+    }
+
+    function invalidateViewportMetrics() {
+      _vvLastTop = null;
+      _vvLastHeight = null;
     }
 
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleViewportResize);
+      // scroll: URL bar / rubber-band; only runs fit when top/height actually change (rounded)
       window.visualViewport.addEventListener('scroll', handleViewportResize);
       handleViewportResize();
     }
+
+    window.addEventListener('resize', () => {
+      if (window.visualViewport) {
+        invalidateViewportMetrics();
+        requestAnimationFrame(handleViewportResize);
+      } else if (activeId && sessions[activeId]) {
+        fitAndKeepScroll(sessions[activeId]);
+      }
+    });
+
+    window.addEventListener('orientationchange', () => {
+      invalidateViewportMetrics();
+      setTimeout(() => {
+        if (window.visualViewport) handleViewportResize();
+        else if (activeId && sessions[activeId]) fitAndKeepScroll(sessions[activeId]);
+      }, 200);
+    });
 
     // Auto-reconnect on page load
     loadGroupInfo();
