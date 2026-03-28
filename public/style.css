@@ -153,6 +153,22 @@ html, body {
   background: var(--bg-raised);
   border-bottom: 1px solid var(--border-panel);
   flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-height: 44px;
+}
+
+.topbar-tabs-view {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.statusbar-footer-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
 }
 
 #tabs-container {
@@ -160,6 +176,8 @@ html, body {
   align-items: center;
   height: 44px;
   padding: 0 2px;
+  flex: 1;
+  min-width: 0;
 }
 
 #tabs {
@@ -3151,3 +3169,4 @@ html, body {
   from { opacity: 1; transform: translateY(0); }
   to { opacity: 0; transform: translateY(-12px); }
 }
+

@@ -19,11 +19,13 @@
   <div id="toast-container"></div>
 
   <div id="app">
-    <!-- Top bar with tabs -->
+    <!-- Top bar: tabs -->
     <div id="topbar">
-      <div id="tabs-container">
-        <div id="tabs"></div>
-        <button id="new-tab-btn" title="New Terminal">+</button>
+      <div id="tabs-view" class="topbar-tabs-view">
+        <div id="tabs-container">
+          <div id="tabs"></div>
+          <button id="new-tab-btn" title="New Terminal">+</button>
+        </div>
       </div>
     </div>
 
@@ -321,7 +323,8 @@
         const data = await resp.json();
         serverPlatform = data.platform;
         availableShells = data.shells || [];
-        defaultShell = availableShells.length > 0 ? availableShells[0].id : 'bash';
+        defaultShell = data.defaultShell
+          || (availableShells.length > 0 ? availableShells[0].id : 'bash');
         renderShellButtons();
       } catch (_) {
         // Fallback: show bash only
@@ -1363,6 +1366,12 @@
     });
 
     // ---- Virtual keyboard ----
+    function decodeVkSeqString(seqStr) {
+      return seqStr
+        .replace(/\\x1b/g, '\x1b')
+        .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    }
+
     function sendKey(key) {
       if (!activeId || !sessions[activeId]) return;
       const s = sessions[activeId];
@@ -1426,10 +1435,7 @@
 
       // Raw escape sequence (Claude Code keys: Alt+P, Esc+Esc, etc.)
       if (btn.dataset.seq) {
-        const raw = btn.dataset.seq
-          .replace(/\\x1b/g, '\x1b')
-          .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-        sendKey(raw);
+        sendKey(decodeVkSeqString(btn.dataset.seq));
         resetModifiers();
         return;
       }
@@ -2236,8 +2242,8 @@
       return 'dom';
     }
 
-    // that calls term.scrollLines() based on finger delta, giving smooth
-    // native-like scrolling on mobile.
+    // Calls term.scrollLines() based on finger delta, giving smooth
+    // native-like scrolling on mobile with inertia.
     function patchIOSTouchScroll(term, container) {
       const viewport = container.querySelector('.xterm-viewport');
       if (!viewport) return;

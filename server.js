@@ -6,18 +6,28 @@ const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 
+
 // ========== Logging System ==========
 const LOG_DIR = path.join(__dirname, 'logs');
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
+let _lastLogDate = '';
 function getLogFileName() {
   const d = new Date();
-  return `hub-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}.log`;
+  const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  if (dateStr !== _lastLogDate) {
+    _lastLogDate = dateStr;
+    _logSizeExceeded = false; // reset cap on new day
+  }
+  return `hub-${dateStr}.log`;
 }
 
 function timestamp() {
   return new Date().toISOString();
 }
+
+const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB per log file
+let _logSizeExceeded = false;
 
 function writeLog(level, category, message, extra) {
   const ts = timestamp();
@@ -25,18 +35,24 @@ function writeLog(level, category, message, extra) {
     ? `[${ts}] [${level}] [${category}] ${message} | ${JSON.stringify(extra)}`
     : `[${ts}] [${level}] [${category}] ${message}`;
 
-  // Console output (wrapped to prevent EPIPE crash)
+  // Console output — only errors/warnings/fatal + startup messages
   try {
-    if (level === 'ERROR' || level === 'FATAL') {
-      process.stderr.write(line + '\n');
-    } else {
-      process.stdout.write(line + '\n');
+    if (level === 'ERROR' || level === 'FATAL' || level === 'WARN' || category === 'server' || category === 'auth') {
+      const stream = (level === 'ERROR' || level === 'FATAL') ? process.stderr : process.stdout;
+      stream.write(line + '\n');
     }
   } catch (_) {}
 
-  // File output
+  // File output (skip if log file already exceeded size cap, except errors)
   try {
-    fs.appendFileSync(path.join(LOG_DIR, getLogFileName()), line + '\n');
+    const logPath = path.join(LOG_DIR, getLogFileName());
+    if (_logSizeExceeded && level !== 'ERROR' && level !== 'FATAL' && level !== 'WARN') return;
+    fs.appendFileSync(logPath, line + '\n');
+    // Check size periodically (every ~100 writes via WARN/ERROR or occasional INFO)
+    if (level === 'WARN' || level === 'ERROR') {
+      const stat = fs.statSync(logPath);
+      _logSizeExceeded = stat.size > MAX_LOG_SIZE;
+    }
   } catch (_) {}
 }
 
@@ -206,6 +222,9 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '5mb' }));
 
 // ========== Request Logging Middleware ==========
+// Noisy polling endpoints — only log on error (4xx/5xx)
+const QUIET_ROUTES = new Set(['/api/groups', '/api/terminals', '/api/platform', '/api/group-info']);
+
 app.use((req, res, next) => {
   const start = Date.now();
   const originalEnd = res.end;
@@ -214,6 +233,11 @@ app.use((req, res, next) => {
     const status = res.statusCode;
     // Only log API requests and errors (skip static assets to reduce noise)
     if (req.path.startsWith('/api/') || status >= 400) {
+      // Skip successful polling endpoints to save disk I/O
+      if (status < 400 && QUIET_ROUTES.has(req.path)) {
+        originalEnd.apply(this, args);
+        return;
+      }
       const level = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
       log[level]('http', `${req.method} ${req.path} → ${status} (${duration}ms)`, {
         ip: req.ip || req.connection?.remoteAddress,
@@ -569,29 +593,55 @@ async function resolveDirectory(inputPath) {
   }
 }
 
+/** Git Bash / MSYS bash paths on Windows (node-pty needs a real executable path). */
+function getWindowsBashPath() {
+  if (process.platform !== 'win32') return null;
+  const roots = [
+    process.env.ProgramFiles,
+    process.env['ProgramFiles(x86)'],
+    'C:\\Program Files',
+    'C:\\Program Files (x86)'
+  ].filter(Boolean);
+  const seen = new Set();
+  for (const root of roots) {
+    const norm = path.normalize(root);
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    const p = path.join(norm, 'Git', 'usr', 'bin', 'bash.exe');
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch (_) {}
+  }
+  return null;
+}
+
 // GET /api/platform — return server OS platform and available shells
 app.get('/api/platform', (req, res) => {
   const plat = process.platform; // 'win32', 'darwin', 'linux', etc.
   let shells;
+  let defaultShell = 'bash';
   if (plat === 'win32') {
     shells = [
+      { id: 'bash', label: 'Bash', icon: '$' },
       { id: 'powershell', label: 'PowerShell', icon: 'PS' },
-      { id: 'cmd', label: 'CMD', icon: '>' },
-      { id: 'bash', label: 'Bash', icon: '$' }
+      { id: 'cmd', label: 'CMD', icon: '>' }
     ];
+    defaultShell = getWindowsBashPath() ? 'bash' : 'powershell';
   } else if (plat === 'darwin') {
     shells = [
       { id: 'zsh', label: 'Zsh', icon: '$' },
       { id: 'bash', label: 'Bash', icon: '$' }
     ];
+    defaultShell = shells[0].id;
   } else {
     shells = [
       { id: 'bash', label: 'Bash', icon: '$' },
       { id: 'zsh', label: 'Zsh', icon: '$' },
       { id: 'sh', label: 'sh', icon: '$' }
     ];
+    defaultShell = shells[0].id;
   }
-  res.json({ platform: plat, shells });
+  res.json({ platform: plat, shells, defaultShell });
 });
 
 // GET /api/fs/drives — list available drive letters (Windows only)
@@ -1224,7 +1274,10 @@ app.get('/api/group-info', (req, res) => {
 });
 
 app.post('/api/terminal/new', async (req, res) => {
-  const shell = req.body.shell || 'bash';
+  const shell = req.body.shell
+    || (process.platform === 'win32'
+      ? (getWindowsBashPath() ? 'bash' : 'powershell')
+      : 'bash');
   const cols = parseInt(req.body.cols) || 120;
   const rows = parseInt(req.body.rows) || 40;
   const group = req.group;
@@ -1254,15 +1307,24 @@ app.post('/api/terminal/new', async (req, res) => {
 
   if (isWin) {
     // Windows: node-pty needs full paths
-    if (shell === 'powershell.exe' || shell === 'powershell') {
+    if (shell === 'bash' || shell === 'bash.exe') {
+      shellCmd = getWindowsBashPath();
+      shellLabel = 'bash';
+      if (!shellCmd) {
+        return res.status(400).json({
+          error: 'Git Bash not found. Install Git for Windows, or use PowerShell / CMD.'
+        });
+      }
+    } else if (shell === 'powershell.exe' || shell === 'powershell') {
       shellCmd = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
       shellLabel = 'powershell';
     } else if (shell === 'cmd.exe' || shell === 'cmd') {
       shellCmd = 'C:\\Windows\\System32\\cmd.exe';
       shellLabel = 'cmd';
     } else {
-      shellCmd = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
-      shellLabel = 'bash';
+      // Legacy default / unknown id: prefer PowerShell on Windows
+      shellCmd = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+      shellLabel = 'powershell';
     }
   } else {
     // macOS / Linux: use standard shell paths
@@ -1281,55 +1343,46 @@ app.post('/api/terminal/new', async (req, res) => {
   log.info('pty', `Creating terminal ${id} for group "${group}": ${shellCmd} (${cols}x${rows}) cwd=${cwd}`);
 
   try {
+    const MAX_BUFFER = 100000;
     const ptyProc = pty.spawn(shellCmd, [], {
       name: 'xterm-256color',
-      cols,
-      rows,
+      cols, rows,
       cwd,
       env: process.env
     });
 
-    let outputBuffer = '';
-    const MAX_BUFFER = 100000; // 100KB buffer for reconnection
+    const termInfo = {
+      pty: ptyProc,
+      shell: shellCmd,
+      shellLabel,
+      _outputBuffer: '',
+      created: new Date().toISOString(),
+      clients: new Set(),
+      getBuffer() { return this._outputBuffer; },
+      group
+    };
 
     ptyProc.onData((data) => {
-      outputBuffer += data;
-      if (outputBuffer.length > MAX_BUFFER) {
-        outputBuffer = outputBuffer.slice(-MAX_BUFFER);
+      termInfo._outputBuffer += data;
+      if (termInfo._outputBuffer.length > MAX_BUFFER) {
+        termInfo._outputBuffer = termInfo._outputBuffer.slice(-MAX_BUFFER);
       }
-      const info = terminals.get(id);
-      if (info && info.clients) {
-        for (const ws of info.clients) {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'output', data }));
-          }
+      if (termInfo.clients) {
+        const msg = JSON.stringify({ type: 'output', data });
+        for (const ws of termInfo.clients) {
+          try {
+            if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+          } catch (_) { termInfo.clients.delete(ws); }
         }
       }
     });
 
     ptyProc.onExit(({ exitCode }) => {
-      log.info('pty', `Terminal ${id} exited with code ${exitCode}`);
-      const info = terminals.get(id);
-      if (info) {
-        for (const ws of info.clients) {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'exit', code: exitCode }));
-            ws.close();
-          }
-        }
-      }
-      terminals.delete(id);
+      log.info('pty', `Terminal ${id} exited (code ${exitCode})`);
+      cleanupTerminal(id);
     });
 
-    terminals.set(id, {
-      pty: ptyProc,
-      shell: shellCmd,
-      shellLabel,
-      created: new Date().toISOString(),
-      clients: new Set(),
-      getBuffer: () => outputBuffer,
-      group // tag terminal with its group
-    });
+    terminals.set(id, termInfo);
 
     res.json({ id, shell: shellLabel, cols, rows, group, cwd });
   } catch (err) {
@@ -1338,7 +1391,7 @@ app.post('/api/terminal/new', async (req, res) => {
   }
 });
 
-app.post('/api/terminal/:id/resize', (req, res) => {
+app.post('/api/terminal/:id/resize', async (req, res) => {
   const id = parseInt(req.params.id);
   const info = terminals.get(id);
   if (!info) return res.status(404).json({ error: 'Terminal not found' });
@@ -1350,20 +1403,35 @@ app.post('/api/terminal/:id/resize', (req, res) => {
   res.json({ ok: true, cols, rows });
 });
 
-app.delete('/api/terminal/:id', (req, res) => {
+app.delete('/api/terminal/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   const info = terminals.get(id);
   if (!info) return res.status(404).json({ error: 'Terminal not found' });
   if (info.group !== req.group) return res.status(403).json({ error: 'Not your terminal' });
 
   try {
-    info.pty.kill();
+    try { info.pty.kill(); } catch (_) {}
     terminals.delete(id);
     res.json({ ok: true, id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+function cleanupTerminal(id) {
+  const info = terminals.get(id);
+  if (info) {
+    for (const ws of info.clients) {
+      try {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'exit', code: 0 }));
+          ws.close();
+        }
+      } catch (_) {}
+    }
+  }
+  terminals.delete(id);
+}
 
 // ========== Server + WebSocket ==========
 
@@ -1459,6 +1527,11 @@ wss.on('connection', (ws, req) => {
     } catch (err) {
       info.pty.write(msg.toString());
     }
+  });
+
+  ws.on('error', (err) => {
+    log.warn('ws', `Client error on terminal ${id}: ${err.message}`);
+    info.clients.delete(ws);
   });
 
   ws.on('close', () => {
