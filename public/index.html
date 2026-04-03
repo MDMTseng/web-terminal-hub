@@ -2267,9 +2267,25 @@
       if (!s || !s.terminal || !s.fitAddon) return;
       // Guard: skip fit when container is too narrow (browser not fully laid out yet, e.g. iOS resume)
       if (s.container && s.container.offsetWidth < 120) return;
+      const prevCols = s.terminal.cols;
       const shouldSnap = !s._userScrolledUp && !isAlternateScreenTerminal(s.terminal);
       s._suppressScrollTrack = true;
       s.fitAddon.fit();
+      // Recovery: if columns collapsed to an absurd value the container was
+      // measured during a transient layout state (iOS keyboard animation).
+      // Schedule a corrective refit after the animation settles.
+      if (s.terminal.cols < 20 && prevCols >= 20) {
+        setTimeout(() => {
+          if (s.terminal && s.fitAddon) {
+            s._suppressScrollTrack = true;
+            s.fitAddon.fit();
+            if (!s._userScrolledUp && !isAlternateScreenTerminal(s.terminal)) {
+              s.terminal.scrollToBottom();
+            }
+            requestAnimationFrame(() => { s._suppressScrollTrack = false; });
+          }
+        }, 300);
+      }
       if (shouldSnap) {
         s.terminal.scrollToBottom();
       }
@@ -3249,6 +3265,7 @@
     let _vvLastTop = null;
     let _vvLastHeight = null;
     let _vvFitTimer = null;
+    let _vvSafetyTimer = null;
 
     function scheduleViewportFit() {
       if (!(activeId && sessions[activeId])) return;
@@ -3257,6 +3274,18 @@
         _vvFitTimer = null;
         fitAndKeepScroll(sessions[activeId]);
       }, 80);
+      // Safety net: iOS keyboard animation can leave the layout in a transient
+      // state when the 80 ms fit fires.  Re-read viewport metrics and refit once
+      // the animation has definitely settled.
+      if (_vvSafetyTimer) clearTimeout(_vvSafetyTimer);
+      _vvSafetyTimer = setTimeout(() => {
+        _vvSafetyTimer = null;
+        invalidateViewportMetrics();
+        handleViewportResize();               // refresh app.style.height/top
+        if (activeId && sessions[activeId]) {
+          fitAndKeepScroll(sessions[activeId]);
+        }
+      }, 500);
     }
 
     function handleViewportResize() {
