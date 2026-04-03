@@ -282,7 +282,9 @@
     <div class="modal-content image-preview-content">
       <button class="image-preview-close" onclick="closeImagePreview()">&times;</button>
       <button class="img-nav-btn img-nav-prev" id="img-nav-prev" onclick="imgPreviewPrev()">‹</button>
-      <img id="image-preview-img" src="" alt="Preview" />
+      <div id="img-zoom-container" class="img-zoom-container">
+        <img id="image-preview-img" src="" alt="Preview" />
+      </div>
       <button class="img-nav-btn img-nav-next" id="img-nav-next" onclick="imgPreviewNext()">›</button>
       <div id="img-name-bubble" class="img-name-bubble hidden"></div>
       <div class="image-preview-footer">
@@ -718,7 +720,7 @@
     // Image gallery navigation state
     let fmImageList = [];    // [{name, path, size}, ...] images in current dir
     let fmImageIndex = -1;   // current index in fmImageList
-    const fmImageCache = new Map(); // path -> blob URL (persists until FM closed)
+    // No client-side image cache — always fetch fresh to reflect remote file changes
 
     const TEXT_EXTENSIONS = ['.txt','.js','.ts','.jsx','.tsx','.json','.md','.html','.htm','.css',
       '.py','.sh','.bash','.zsh','.log','.xml','.yaml','.yml','.toml','.ini','.conf','.cfg',
@@ -746,11 +748,6 @@
       closeModal('file-manager-modal');
       fmClearSelection();
       currentFmPath = '';
-      // Clear image cache
-      for (const blobUrl of fmImageCache.values()) {
-        try { URL.revokeObjectURL(blobUrl); } catch (_) {}
-      }
-      fmImageCache.clear();
       fmImageList = [];
       fmImageIndex = -1;
     }
@@ -1180,6 +1177,7 @@
     function showImageAtIndex(idx, fileInfo) {
       const item = idx >= 0 && idx < fmImageList.length ? fmImageList[idx] : fileInfo;
       if (!item) return;
+      if (window._imgZoomReset) window._imgZoomReset();
       const img = document.getElementById('image-preview-img');
 
       // Track whether this image loaded successfully (to avoid false error toasts)
@@ -1195,26 +1193,22 @@
         if (loaded || !img.src || img.src === location.href) return;
       };
 
-      const cachedUrl = fmImageCache.get(item.path);
-      if (cachedUrl) {
-        img.src = cachedUrl;
-      } else {
-        const url = '/api/fs/preview?path=' + encodeURIComponent(item.path);
-        // Fetch as blob for caching
+      {
+        const url = '/api/fs/preview?path=' + encodeURIComponent(item.path) + '&t=' + Date.now();
         authFetch(url).then(resp => {
           if (!resp.ok) throw new Error('Failed');
           return resp.blob();
         }).then(blob => {
           const blobUrl = URL.createObjectURL(blob);
-          fmImageCache.set(item.path, blobUrl);
           // Only set if still viewing this image
           const curItem = fmImageIndex >= 0 ? fmImageList[fmImageIndex] : null;
           if (curItem && curItem.path === item.path) {
             img.src = blobUrl;
           }
+          // Revoke after load to free memory
+          img.addEventListener('load', () => URL.revokeObjectURL(blobUrl), { once: true });
         }).catch(() => {
-          // Fallback: direct URL load
-          const fallbackUrl = '/api/fs/preview?path=' + encodeURIComponent(item.path);
+          const fallbackUrl = '/api/fs/preview?path=' + encodeURIComponent(item.path) + '&t=' + Date.now();
           img.onerror = () => showToast('Failed to load: ' + item.name, 'error');
           img.src = fallbackUrl;
         });
@@ -1276,26 +1270,11 @@
     }
 
     function preloadAdjacentImages() {
-      // Preload prev and next images into cache
-      const indices = [fmImageIndex - 1, fmImageIndex + 1];
-      for (const i of indices) {
-        if (i < 0 || i >= fmImageList.length) continue;
-        const item = fmImageList[i];
-        if (fmImageCache.has(item.path)) continue;
-        const url = '/api/fs/preview?path=' + encodeURIComponent(item.path);
-        authFetch(url).then(resp => {
-          if (!resp.ok) return;
-          return resp.blob();
-        }).then(blob => {
-          if (blob) {
-            const blobUrl = URL.createObjectURL(blob);
-            fmImageCache.set(item.path, blobUrl);
-          }
-        }).catch(() => {});
-      }
+      // No-op: skip preloading to ensure fresh content on each view
     }
 
     function closeImagePreview() {
+      if (window._imgZoomReset) window._imgZoomReset();
       closeModal('image-preview-modal');
       document.getElementById('image-preview-img').src = '';
       fmImageIndex = -1;
@@ -1317,27 +1296,187 @@
       showToast('Download started: ' + (fileName || 'file'), 'success');
     }
 
-    // Image preview swipe support for mobile
+    // Image preview: pinch-to-zoom, drag-to-pan, double-tap reset, swipe navigation
+    // Transform model: translate(panX,panY) scale(s) with transform-origin 0 0
+    // Element point (x,y) → screen: (x*scale + panX + elemLeft, y*scale + panY + elemTop)
+    // where elemLeft/elemTop is the CSS layout position (flexbox-centered in container)
     (function() {
-      const imgContent = document.querySelector('.image-preview-content');
-      let swipeStartX = 0, swipeStartY = 0, swiping = false;
-      imgContent.addEventListener('touchstart', (e) => {
-        if (fmImageList.length <= 1) return;
-        swipeStartX = e.touches[0].clientX;
-        swipeStartY = e.touches[0].clientY;
-        swiping = true;
-      }, { passive: true });
-      imgContent.addEventListener('touchend', (e) => {
-        if (!swiping) return;
-        swiping = false;
-        const dx = e.changedTouches[0].clientX - swipeStartX;
-        const dy = e.changedTouches[0].clientY - swipeStartY;
-        // Only horizontal swipe, min 50px, and more horizontal than vertical
-        if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-          if (dx < 0) imgPreviewNext();  // swipe left = next
-          else imgPreviewPrev();          // swipe right = prev
+      const container = document.getElementById('img-zoom-container');
+      const img = document.getElementById('image-preview-img');
+
+      let scale = 1, panX = 0, panY = 0;
+      let startScale = 1, startPanX = 0, startPanY = 0;
+      let startDist = 0;
+      // Focal point in image-local coords, cached at pinch start
+      let focalX = 0, focalY = 0;
+      // Element layout position (without transform), cached at gesture start
+      let elemLeft = 0, elemTop = 0;
+      let lastTapTime = 0;
+      // Single-finger tracking for pan vs swipe
+      let oneFingerStartX = 0, oneFingerStartY = 0;
+      let pinching = false;
+
+      function applyTransform() {
+        img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+      }
+
+      // Clamp pan so zoomed image doesn't show empty space beyond its edges
+      function clampPan() {
+        if (scale <= 1) { panX = 0; panY = 0; return; }
+        const cw = container.clientWidth;
+        const ch = container.clientHeight;
+        const ew = img.offsetWidth;
+        const eh = img.offsetHeight;
+
+        // X axis: image screen span = [offX + panX, offX + panX + ew*scale]
+        // where offX = (cw - ew) / 2 from flexbox centering
+        if (ew * scale > cw) {
+          // Don't let image edges come inside the container
+          const maxPanX = (ew - cw) / 2;
+          const minPanX = (cw + ew) / 2 - ew * scale;
+          panX = Math.max(minPanX, Math.min(maxPanX, panX));
+        } else {
+          // Scaled image smaller than container — center it
+          panX = ew * (1 - scale) / 2;
+        }
+        // Y axis
+        if (eh * scale > ch) {
+          const maxPanY = (eh - ch) / 2;
+          const minPanY = (ch + eh) / 2 - eh * scale;
+          panY = Math.max(minPanY, Math.min(maxPanY, panY));
+        } else {
+          panY = eh * (1 - scale) / 2;
+        }
+      }
+
+      // Zoom towards a screen point: adjusts panX/panY so the image content
+      // under (screenX, screenY) stays at that screen position after scale change
+      function zoomToPoint(screenX, screenY, newScale) {
+        const imgRect = img.getBoundingClientRect();
+        // Image-local coord under the screen point
+        const localX = (screenX - imgRect.left) / scale;
+        const localY = (screenY - imgRect.top) / scale;
+        // Element layout position (before transforms)
+        const eLeft = imgRect.left - panX;
+        const eTop = imgRect.top - panY;
+        scale = newScale;
+        // Solve: screenX = eLeft + localX * newScale + newPanX
+        panX = screenX - eLeft - localX * newScale;
+        panY = screenY - eTop - localY * newScale;
+      }
+
+      window._imgZoomReset = function() {
+        scale = 1; panX = 0; panY = 0;
+        img.style.transform = '';
+      };
+
+      function dist(t1, t2) {
+        return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      }
+      function midpoint(t1, t2) {
+        return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
+      }
+
+      container.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+          // Pinch start — cache focal point in image-local coords
+          pinching = true;
+          startScale = scale;
+          startDist = dist(e.touches[0], e.touches[1]);
+          const mid = midpoint(e.touches[0], e.touches[1]);
+          const imgRect = img.getBoundingClientRect();
+          focalX = (mid.x - imgRect.left) / scale;
+          focalY = (mid.y - imgRect.top) / scale;
+          elemLeft = imgRect.left - panX;
+          elemTop = imgRect.top - panY;
+        } else if (e.touches.length === 1) {
+          const now = Date.now();
+          const t = e.touches[0];
+          // Double-tap detection
+          if (now - lastTapTime < 300) {
+            if (scale > 1.05) {
+              // Reset zoom
+              scale = 1; panX = 0; panY = 0;
+            } else {
+              // Zoom to 3x centered on tap point
+              zoomToPoint(t.clientX, t.clientY, 3);
+              clampPan();
+            }
+            applyTransform();
+            lastTapTime = 0;
+            e.preventDefault();
+            return;
+          }
+          lastTapTime = now;
+          // Start single-finger gesture
+          oneFingerStartX = t.clientX;
+          oneFingerStartY = t.clientY;
+          startPanX = panX;
+          startPanY = panY;
+        }
+      }, { passive: false });
+
+      container.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 2 && pinching) {
+          // Pinch zoom — keep focal point under the current midpoint
+          e.preventDefault();
+          const curDist = dist(e.touches[0], e.touches[1]);
+          const newScale = Math.max(1, Math.min(10, startScale * (curDist / startDist)));
+          const curMid = midpoint(e.touches[0], e.touches[1]);
+          // Solve: curMid = elemLeft + focalX * newScale + newPanX
+          scale = newScale;
+          panX = curMid.x - elemLeft - focalX * newScale;
+          panY = curMid.y - elemTop - focalY * newScale;
+          clampPan();
+          applyTransform();
+        } else if (e.touches.length === 1 && scale > 1.05) {
+          // Drag to pan when zoomed
+          e.preventDefault();
+          const t = e.touches[0];
+          panX = startPanX + (t.clientX - oneFingerStartX);
+          panY = startPanY + (t.clientY - oneFingerStartY);
+          clampPan();
+          applyTransform();
+        }
+      }, { passive: false });
+
+      container.addEventListener('touchend', (e) => {
+        if (e.touches.length < 2) {
+          if (pinching && e.touches.length === 1) {
+            // Transitioning from pinch to single-finger — reset pan tracking
+            // so the remaining finger doesn't cause a pan jump
+            oneFingerStartX = e.touches[0].clientX;
+            oneFingerStartY = e.touches[0].clientY;
+            startPanX = panX;
+            startPanY = panY;
+          }
+          pinching = false;
+        }
+        // Swipe navigation only when NOT zoomed and single finger
+        if (e.touches.length === 0 && scale <= 1.05 && fmImageList.length > 1) {
+          const dx = e.changedTouches[0].clientX - oneFingerStartX;
+          const dy = e.changedTouches[0].clientY - oneFingerStartY;
+          if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+            if (dx < 0) imgPreviewNext();
+            else imgPreviewPrev();
+          }
+        }
+        // Snap back to 1x if barely zoomed
+        if (e.touches.length === 0 && scale < 1.05) {
+          scale = 1; panX = 0; panY = 0;
+          applyTransform();
         }
       }, { passive: true });
+
+      // Mouse wheel zoom (desktop) — zoom centered on cursor
+      container.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+        const newScale = Math.max(1, Math.min(10, scale * factor));
+        zoomToPoint(e.clientX, e.clientY, newScale);
+        clampPan();
+        applyTransform();
+      }, { passive: false });
     })();
 
     // Keyboard navigation for image preview
@@ -1773,17 +1912,6 @@
           attachPaths.push(...uploaded.map(f => f.path));
         }
 
-        // Build final text: user text + attached file paths
-        let finalText = text || '';
-        if (attachPaths.length > 0) {
-          const pathStr = attachPaths.join(' ');
-          if (finalText) {
-            finalText = finalText + ' ' + pathStr;
-          } else {
-            finalText = pathStr;
-          }
-        }
-
         // Close modal
         area.value = '';
         updateTextInputInfo();
@@ -1791,17 +1919,37 @@
         area.blur();
         clearAllAttachments();
 
-        // Send after modal dismissed (with chunking for long text)
+        // Send after modal dismissed
+        // Each attachment path is sent separately with a delay so the
+        // receiving process (e.g. Claude Code) can register each file.
+        const ATTACH_DELAY = 500; // ms between each attachment path
         setTimeout(async () => {
-          if (finalText) {
-            await sendChunked(s.ws, finalText);
+          if (text) {
+            await sendChunked(s.ws, text);
+          }
+          if (attachPaths.length > 0) {
+            for (let i = 0; i < attachPaths.length; i++) {
+              if (i > 0 || text) {
+                // Add a space separator before this path
+                s.ws.send(JSON.stringify({ type: 'input', data: ' ' }));
+              }
+              await sendChunked(s.ws, attachPaths[i]);
+              // Wait between each attachment so the target can process it
+              if (i < attachPaths.length - 1) {
+                await new Promise(r => setTimeout(r, ATTACH_DELAY));
+              }
+            }
           }
           if (withEnter) {
+            // Extra delay before Enter when attachments are present
+            if (attachPaths.length > 0) {
+              await new Promise(r => setTimeout(r, ATTACH_DELAY));
+            }
             s.ws.send(JSON.stringify({ type: 'input', data: '\r' }));
           }
           showToast(attachPaths.length > 0
             ? `Sent with ${attachPaths.length} attachment${attachPaths.length > 1 ? 's' : ''}`
-            : `Sent (${finalText.length} chars)`, 'success');
+            : `Sent (${(text || '').length} chars)`, 'success');
           setTimeout(() => {
             if (activeId && sessions[activeId] && sessions[activeId].terminal) {
               sessions[activeId].terminal.focus();
@@ -2117,6 +2265,8 @@
     // Never auto snap on the alternate screen — the app owns the viewport (TUI redraws).
     function fitAndKeepScroll(s) {
       if (!s || !s.terminal || !s.fitAddon) return;
+      // Guard: skip fit when container is too narrow (browser not fully laid out yet, e.g. iOS resume)
+      if (s.container && s.container.offsetWidth < 120) return;
       const shouldSnap = !s._userScrolledUp && !isAlternateScreenTerminal(s.terminal);
       s._suppressScrollTrack = true;
       s.fitAddon.fit();
@@ -2519,11 +2669,40 @@
           return;
         }
 
-        // Check if file is already open — switch to existing tab
+        // Check if file is already open — refresh content and switch to tab
         for (const [existingId, s] of Object.entries(sessions)) {
           if (s.type === 'file' && s.filePath === data.path) {
+            // Rebuild content table with fresh data
+            const contentArea = s.container.querySelector('.file-viewer-content');
+            if (contentArea) {
+              const lines = data.content.split('\n');
+              const table = document.createElement('table');
+              table.className = 'file-viewer-table';
+              for (let i = 0; i < lines.length; i++) {
+                const tr = document.createElement('tr');
+                if (lineNumber && i + 1 === lineNumber) tr.className = 'file-viewer-highlight-line';
+                const tdNum = document.createElement('td');
+                tdNum.className = 'file-line-num';
+                tdNum.textContent = i + 1;
+                const tdCode = document.createElement('td');
+                tdCode.className = 'file-line-code';
+                tdCode.textContent = lines[i];
+                tr.appendChild(tdNum);
+                tr.appendChild(tdCode);
+                table.appendChild(tr);
+              }
+              contentArea.innerHTML = '';
+              contentArea.appendChild(table);
+            }
+            // Update meta in header
+            const metaEl = s.container.querySelector('.file-viewer-meta');
+            if (metaEl) metaEl.textContent = `${formatFileSize(data.size)} \u00b7 ${data.extension || 'text'}`;
             switchTab(parseInt(existingId) || existingId);
-            showToast(`Already open: ${data.name}`, 'info');
+            showToast(`Refreshed: ${data.name}`, 'info');
+            if (lineNumber) {
+              const highlightRow = s.container.querySelector('.file-viewer-highlight-line');
+              if (highlightRow) setTimeout(() => highlightRow.scrollIntoView({ block: 'center' }), 100);
+            }
             return;
           }
         }
@@ -3021,13 +3200,24 @@
             }
           }
           if (!anyDead) hideReconnectBanner();
-          // Light refit only. Heavy reflowTerminal() (font toggle + 2× fit) was resetting
-          // scroll to top then stepping to bottom — very slow with large scrollback on mobile.
-          // Heavy reflow (⤓) only if needed; reconnect uses light afterReconnectReplay.
+          // Light refit — fitAndKeepScroll guards against too-narrow container
           if (activeId && sessions[activeId] && sessions[activeId].terminal) {
             fitAndKeepScroll(sessions[activeId]);
           }
         }, 500);
+        // On iOS, visualViewport dimensions may not be fully restored after 500ms.
+        // Schedule additional refit attempts to catch late layout updates.
+        for (const delay of [1000, 2000]) {
+          setTimeout(() => {
+            if (document.visibilityState !== 'visible') return;
+            if (activeId && sessions[activeId] && sessions[activeId].terminal) {
+              // Force viewport metrics recalculation
+              invalidateViewportMetrics();
+              if (window.visualViewport) handleViewportResize();
+              fitAndKeepScroll(sessions[activeId]);
+            }
+          }, delay);
+        }
       }
     });
 

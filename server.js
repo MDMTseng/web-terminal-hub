@@ -737,6 +737,7 @@ app.get('/api/fs/read', async (req, res) => {
       return res.status(415).json({ error: 'Binary file cannot be displayed' });
     }
 
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     const content = await fsPromises.readFile(real, 'utf-8');
     res.json({
       path: real,
@@ -847,7 +848,8 @@ app.get('/api/fs/preview', async (req, res) => {
     res.setHeader('Content-Type', mime);
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileName)}"`);
     res.setHeader('Content-Length', stat.size);
-    res.setHeader('Cache-Control', 'private, max-age=300'); // 5 min cache
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('ETag', `"${stat.mtimeMs}-${stat.size}"`); // mtime-based ETag for conditional requests
 
     const stream = fs.createReadStream(real);
     stream.pipe(res);
