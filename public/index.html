@@ -2246,6 +2246,27 @@
       });
     }
 
+    // Write data to terminal, preserving scroll position when user has scrolled up.
+    // xterm.js write() auto-scrolls to bottom even when the user isn't at the bottom,
+    // which fights mouse-wheel scrollback (touch/selection are unaffected because xterm
+    // suppresses auto-scroll during those gestures internally).
+    function scrollAwareWrite(s, data) {
+      if (!s || !s.terminal) return;
+      if (s._userScrolledUp && !isAlternateScreenTerminal(s.terminal)) {
+        const viewport = s.container.querySelector('.xterm-viewport');
+        const savedScrollTop = viewport ? viewport.scrollTop : null;
+        s._suppressScrollTrack = true;
+        s.terminal.write(data, () => {
+          if (viewport && savedScrollTop !== null) {
+            viewport.scrollTop = savedScrollTop;
+          }
+          requestAnimationFrame(() => { s._suppressScrollTrack = false; });
+        });
+      } else {
+        s.terminal.write(data);
+      }
+    }
+
     // Snap terminal to bottom, suppressing scroll tracking so the snap
     // itself doesn't get misread as "user scrolled up".
     // Single scrollToBottom — chaining multiple snaps caused visible "crazy scroll" on large buffers.
@@ -2259,32 +2280,36 @@
       });
     }
 
+    // ---- Safe fit: prevent destructive narrow reflows ----
+    // On mobile, keyboard open/close animations can transiently shrink the
+    // container to near-zero width. If fit() runs at that moment, xterm
+    // reflows the entire scrollback to ~8 columns — irreversible damage.
+    // Use proposeDimensions() to check BEFORE applying.
+    const MIN_FIT_COLS = 20;
+
+    function safeFit(s) {
+      if (!s || !s.terminal || !s.fitAddon) return false;
+      try {
+        const dims = s.fitAddon.proposeDimensions();
+        if (!dims || dims.cols < MIN_FIT_COLS) return false;
+        s.fitAddon.fit();
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
     // ---- Fit terminal and preserve scroll position ----
     // After fit(), xterm reflows and may reset scroll to top.
     // If user was at bottom (not manually scrolled up), snap back.
     // Never auto snap on the alternate screen — the app owns the viewport (TUI redraws).
     function fitAndKeepScroll(s) {
       if (!s || !s.terminal || !s.fitAddon) return;
-      // Guard: skip fit when container is too narrow (browser not fully laid out yet, e.g. iOS resume)
-      if (s.container && s.container.offsetWidth < 120) return;
-      const prevCols = s.terminal.cols;
       const shouldSnap = !s._userScrolledUp && !isAlternateScreenTerminal(s.terminal);
       s._suppressScrollTrack = true;
-      s.fitAddon.fit();
-      // Recovery: if columns collapsed to an absurd value the container was
-      // measured during a transient layout state (iOS keyboard animation).
-      // Schedule a corrective refit after the animation settles.
-      if (s.terminal.cols < 20 && prevCols >= 20) {
-        setTimeout(() => {
-          if (s.terminal && s.fitAddon) {
-            s._suppressScrollTrack = true;
-            s.fitAddon.fit();
-            if (!s._userScrolledUp && !isAlternateScreenTerminal(s.terminal)) {
-              s.terminal.scrollToBottom();
-            }
-            requestAnimationFrame(() => { s._suppressScrollTrack = false; });
-          }
-        }, 300);
+      if (!safeFit(s)) {
+        s._suppressScrollTrack = false;
+        return;
       }
       if (shouldSnap) {
         s.terminal.scrollToBottom();
@@ -2304,10 +2329,10 @@
       s._suppressScrollTrack = true;
       const origSize = s.terminal.options.fontSize;
       s.terminal.options.fontSize = origSize + 1;
-      s.fitAddon.fit();
+      safeFit(s);
       requestAnimationFrame(() => {
         s.terminal.options.fontSize = origSize;
-        s.fitAddon.fit();
+        safeFit(s);
         if (shouldSnap) s.terminal.scrollToBottom();
         s._suppressScrollTrack = false;
         if (callback) callback();
@@ -2348,10 +2373,10 @@
         const s = sessions[activeId];
         s._userScrolledUp = false;
         if (isAlternateScreenTerminal(s.terminal)) {
-          try { s.fitAddon.fit(); } catch (_) {}
+          safeFit(s);
         } else {
           s._suppressScrollTrack = true;
-          try { s.fitAddon.fit(); } catch (_) {}
+          safeFit(s);
           s.terminal.scrollToBottom();
           requestAnimationFrame(() => {
             try {
@@ -3072,7 +3097,7 @@
         // On reconnect: clear terminal so buffered replay doesn't double up
         s.terminal.clear();
         // Re-fit and send correct dimensions
-        try { s.fitAddon.fit(); } catch(_) {}
+        safeFit(s);
         const dims = s.fitAddon.proposeDimensions();
         if (dims) {
           ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
@@ -3085,7 +3110,7 @@
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
-            s.terminal.write(msg.data);
+            scrollAwareWrite(s, msg.data);
             scanOutputForLinks(msg.data);
             // After reconnect buffer replay — avoid heavy reflowTerminal (see afterReconnectReplay)
             if (s._reconnecting) {
@@ -3097,15 +3122,15 @@
               }, 150);
             }
           } else if (msg.type === 'exit') {
-            s.terminal.write(`\r\n\x1b[31m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
+            scrollAwareWrite(s, `\r\n\x1b[31m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
           } else if (msg.type === 'error') {
-            s.terminal.write(`\r\n\x1b[31m[Error: ${msg.message}]\x1b[0m\r\n`);
+            scrollAwareWrite(s, `\r\n\x1b[31m[Error: ${msg.message}]\x1b[0m\r\n`);
           } else if (msg.type === 'kicked') {
             s._kicked = true;
             handleKicked(msg.message);
           }
         } catch (err) {
-          s.terminal.write(event.data);
+          scrollAwareWrite(s, event.data);
         }
       };
 
