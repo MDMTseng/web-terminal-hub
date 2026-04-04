@@ -2507,7 +2507,10 @@
         function inertiaStep(now) {
           const frameDt = now - lastFrame;
           lastFrame = now;
-          v *= Math.pow(friction, frameDt / 16);  // frame-rate independent damping
+          // Friction increases as velocity drops — snappy stop at low speed
+          const absV = Math.abs(v);
+          const f = absV > 0.3 ? friction : absV > 0.1 ? 0.3 : 0.7;
+          v *= Math.pow(f, frameDt / 16);  // frame-rate independent damping
           if (Math.abs(v) < 0.005) { inertiaRAF = 0; return; }
           residual += v * frameDt;
           const lines = Math.trunc(residual / lineHeight);
