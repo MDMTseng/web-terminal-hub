@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#1a1a2e">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon-192.png">
   <title>Terminal Hub</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
@@ -2281,10 +2285,11 @@
     }
 
     // ---- Safe fit: prevent destructive narrow reflows ----
-    // On mobile, keyboard open/close animations can transiently shrink the
-    // container to near-zero width. If fit() runs at that moment, xterm
-    // reflows the entire scrollback to ~8 columns — irreversible damage.
-    // Use proposeDimensions() to check BEFORE applying.
+    // On mobile (especially iOS PWA), app-switch / keyboard animations can
+    // transiently shrink the container. If fit() runs at that moment, xterm
+    // reflows the entire scrollback to very few columns — irreversible damage.
+    // Guard: check proposeDimensions() BEFORE applying, reject if cols would
+    // drop below an absolute minimum OR below half the last known good width.
     const MIN_FIT_COLS = 20;
 
     function safeFit(s) {
@@ -2292,6 +2297,10 @@
       try {
         const dims = s.fitAddon.proposeDimensions();
         if (!dims || dims.cols < MIN_FIT_COLS) return false;
+        // Reject if cols would shrink to less than half the current width
+        // (transient layout glitch during iOS app-switch / keyboard animation)
+        const curCols = s.terminal.cols;
+        if (curCols >= MIN_FIT_COLS && dims.cols < curCols * 0.5) return false;
         s.fitAddon.fit();
         return true;
       } catch (_) {
@@ -2314,7 +2323,13 @@
       if (shouldSnap) {
         s.terminal.scrollToBottom();
       }
+      // Force full repaint — WebGL/Canvas renderers can leave stale content
+      // after row count changes (e.g. keyboard dismiss on mobile)
       requestAnimationFrame(() => {
+        try {
+          const t = s.terminal;
+          if (typeof t.refresh === 'function') t.refresh(0, t.rows - 1);
+        } catch (_) {}
         if (shouldSnap) s.terminal.scrollToBottom();
         s._suppressScrollTrack = false;
       });
@@ -2369,6 +2384,10 @@
     // ---- Scroll to bottom (⤓) — light path; reflowTerminal + double snap was janky on busy buffers ----
     document.getElementById('vk-scroll-btn').addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
+      // On iOS, safeFit/scrollToBottom can refocus xterm's hidden textarea
+      // and pop the on-screen keyboard. Remember pre-state and restore.
+      const prevActive = document.activeElement;
+      const wasTextareaFocused = prevActive && prevActive.tagName === 'TEXTAREA';
       if (activeId && sessions[activeId] && sessions[activeId].terminal) {
         const s = sessions[activeId];
         s._userScrolledUp = false;
@@ -2387,7 +2406,9 @@
             s._suppressScrollTrack = false;
           });
         }
-        s.terminal.focus();
+        // Only re-focus terminal if a textarea was already focused (keyboard up).
+        // Otherwise focusing would pop the on-screen keyboard on iOS.
+        if (wasTextareaFocused) s.terminal.focus();
       }
     });
 
@@ -2398,8 +2419,12 @@
     // WebGL gives ~900% faster rendering; Canvas is a good middle ground.
     // Both dramatically improve layout stability during long output (e.g. Claude Code).
     function loadBestRenderer(term) {
+      // iOS Safari has a glyph-clipping bug with xterm.js WebGL renderer
+      // (bottom-right of each character gets cut). Skip WebGL on iOS.
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
       // Try WebGL first (requires WebGL2 context)
-      if (typeof WebglAddon !== 'undefined') {
+      if (!isIOS && typeof WebglAddon !== 'undefined') {
         try {
           const webgl = new WebglAddon.WebglAddon();
           webgl.onContextLoss(() => {
@@ -2866,31 +2891,9 @@
       }
     }
 
-    // ---- Tab swipe gestures ----
-    (function setupTabSwipe() {
-      const area = document.getElementById('terminal-area');
-      let startX = 0, startY = 0;
-      area.addEventListener('touchstart', (e) => {
-        if (e.touches.length !== 1) return;
-        startX = e.touches[0].clientX;
-        startY = e.touches[0].clientY;
-      }, { passive: true });
-      area.addEventListener('touchend', (e) => {
-        if (e.changedTouches.length !== 1) return;
-        const dx = e.changedTouches[0].clientX - startX;
-        const dy = e.changedTouches[0].clientY - startY;
-        // Threshold: 80px horizontal, must be 2x vertical component
-        if (Math.abs(dx) < 80 || Math.abs(dx) < Math.abs(dy) * 2) return;
-        const ids = Object.keys(sessions);
-        if (ids.length < 2) return;
-        const curIdx = ids.indexOf(String(activeId));
-        if (curIdx < 0) return;
-        const nextIdx = dx < 0 ? curIdx + 1 : curIdx - 1;
-        if (nextIdx >= 0 && nextIdx < ids.length) {
-          switchTab(parseInt(ids[nextIdx]) || ids[nextIdx]);
-        }
-      }, { passive: true });
-    })();
+    // ---- Tab swipe gestures (disabled) ----
+    // Edge swipe to change tab was too easy to trigger accidentally
+    // (and conflicts with iOS Safari's back-swipe). Left disabled.
 
     async function closeTerminal(id) {
       haptic(20);
@@ -3255,9 +3258,7 @@
           setTimeout(() => {
             if (document.visibilityState !== 'visible') return;
             if (activeId && sessions[activeId] && sessions[activeId].terminal) {
-              // Force viewport metrics recalculation
-              invalidateViewportMetrics();
-              if (window.visualViewport) handleViewportResize();
+              if (window.visualViewport) handleViewportChange();
               fitAndKeepScroll(sessions[activeId]);
             }
           }, delay);
@@ -3284,84 +3285,56 @@
       window.location.href = '/welcome';
     });
 
-    // ---- Mobile: #app vs system keyboard (visualViewport) ----
-    // The OS resizes or shifts the layout when the IME opens. We also size #app from
-    // visualViewport — that is correct, but (1) window "resize" often fires in the same
-    // frame and used to call fit() separately, stacking with this path; (2) height must
-    // stay within layout viewport bounds or you get an extra blank band ("double" inset).
-    // interactive-widget=resizes-content (viewport meta) aligns Chrome with a resized layout.
-    let _vvLastTop = null;
-    let _vvLastHeight = null;
-    let _vvFitTimer = null;
-    let _vvSafetyTimer = null;
+    // ---- Mobile keyboard: resize app + refit rows only ----
+    // Shrink #app to the visible area above the keyboard, then refit the
+    // terminal.  Since the WIDTH doesn't change, fit() only adjusts rows —
+    // no column change → no text re-wrapping → no content loss.
+    // The safeFit() guard rejects any fit that would shrink cols by >50%,
+    // so transient narrow layouts are still blocked.
 
-    function scheduleViewportFit() {
-      if (!(activeId && sessions[activeId])) return;
-      if (_vvFitTimer) clearTimeout(_vvFitTimer);
-      _vvFitTimer = setTimeout(() => {
-        _vvFitTimer = null;
-        fitAndKeepScroll(sessions[activeId]);
-      }, 80);
-      // Safety net: iOS keyboard animation can leave the layout in a transient
-      // state when the 80 ms fit fires.  Re-read viewport metrics and refit once
-      // the animation has definitely settled.
-      if (_vvSafetyTimer) clearTimeout(_vvSafetyTimer);
-      _vvSafetyTimer = setTimeout(() => {
-        _vvSafetyTimer = null;
-        invalidateViewportMetrics();
-        handleViewportResize();               // refresh app.style.height/top
-        if (activeId && sessions[activeId]) {
-          fitAndKeepScroll(sessions[activeId]);
-        }
-      }, 500);
-    }
+    let _vvLastH = null;
 
-    function handleViewportResize() {
+    function handleViewportChange() {
       const vv = window.visualViewport;
       if (!vv) return;
 
-      const top = Math.round(vv.offsetTop);
-      const h = Math.round(vv.height);
-      if (_vvLastTop === top && _vvLastHeight === h) return;
-      _vvLastTop = top;
-      _vvLastHeight = h;
-
       const app = document.getElementById('app');
-      const innerH = typeof window.innerHeight === 'number' ? window.innerHeight : h;
-      const maxH = Math.max(0, innerH - top);
-      const clampedH = Math.min(h, maxH);
+      const fullH = window.innerHeight;
+      const visibleH = Math.round(vv.height);
+      const kbHeight = fullH - visibleH - Math.round(vv.offsetTop);
 
+      const h = kbHeight > 80 ? visibleH : fullH;
       app.style.top = vv.offsetTop + 'px';
-      app.style.height = clampedH + 'px';
+      app.style.height = h + 'px';
 
-      scheduleViewportFit();
-    }
-
-    function invalidateViewportMetrics() {
-      _vvLastTop = null;
-      _vvLastHeight = null;
+      // Only refit when height actually changed
+      if (_vvLastH !== h) {
+        _vvLastH = h;
+        if (activeId && sessions[activeId]) {
+          fitAndKeepScroll(sessions[activeId]);
+        }
+      }
     }
 
     if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', handleViewportResize);
-      // scroll: URL bar / rubber-band; only runs fit when top/height actually change (rounded)
-      window.visualViewport.addEventListener('scroll', handleViewportResize);
-      handleViewportResize();
+      window.visualViewport.addEventListener('resize', handleViewportChange);
+      window.visualViewport.addEventListener('scroll', handleViewportChange);
+      handleViewportChange();
     }
 
     window.addEventListener('resize', () => {
       if (window.visualViewport) {
-        invalidateViewportMetrics();
-        requestAnimationFrame(handleViewportResize);
+        _vvLastH = null; // force re-evaluation
+        requestAnimationFrame(handleViewportChange);
       } else if (activeId && sessions[activeId]) {
         fitAndKeepScroll(sessions[activeId]);
       }
     });
 
     window.addEventListener('orientationchange', () => {
-      invalidateViewportMetrics();
+      _vvLastH = null;
       setTimeout(() => {
-        if (window.visualViewport) handleViewportResize();
+        if (window.visualViewport) handleViewportChange();
         else if (activeId && sessions[activeId]) fitAndKeepScroll(sessions[activeId]);
       }, 200);
     });
@@ -3370,6 +3343,11 @@
     loadGroupInfo();
     fetchPlatform();
     reconnectExisting();
+
+    // Register service worker for PWA installability
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
   </script>
 </body>
 </html>
