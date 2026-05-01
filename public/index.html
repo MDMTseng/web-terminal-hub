@@ -2789,7 +2789,7 @@
         return { col: Math.max(1, Math.floor(nCols / 2)), row: Math.max(1, Math.floor(nRows / 2)) };
       }
       const rect = xtermEl.getBoundingClientRect();
-      const pad = 2;
+      const pad = 0;
       const usableW = Math.max(1, rect.width - 2 * pad);
       const usableH = Math.max(1, rect.height - 2 * pad);
       const relX = Math.max(0, cx - rect.left - pad);
@@ -2961,7 +2961,7 @@
         `position:fixed;left:-10000px;top:0;width:${w}px;height:${h}px;overflow:hidden;visibility:hidden;pointer-events:none`;
       document.body.appendChild(ghost);
       const padBox = document.createElement('div');
-      padBox.style.cssText = 'box-sizing:border-box;width:100%;height:100%;padding:2px';
+      padBox.style.cssText = 'box-sizing:border-box;width:100%;height:100%;padding:0';
       ghost.appendChild(padBox);
       let term = null;
       try {
