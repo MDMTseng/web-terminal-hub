@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a3a5c"/>
+      <stop offset="100%" stop-color="#1a1a2e"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="92" fill="url(#bg)"/>
+  <!-- Speech bubble body -->
+  <rect x="72" y="80" width="368" height="280" rx="48" fill="none" stroke="#c0c8d8" stroke-width="22" stroke-linejoin="round"/>
+  <rect x="72" y="80" width="368" height="280" rx="48" fill="#1a1a2e" opacity="0.4"/>
+  <!-- Speech bubble tail -->
+  <polygon points="140,360 170,430 210,355" fill="none" stroke="#c0c8d8" stroke-width="22" stroke-linejoin="round"/>
+  <polygon points="148,358 174,420 206,354" fill="#222a40"/>
+  <!-- Cover overlap between tail and body -->
+  <rect x="138" y="335" width="80" height="30" fill="#222a40"/>
+  <!-- Chevron > -->
+  <polyline points="160,165 250,220 160,275" fill="none" stroke="#e0e6f0" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Underscore _ -->
+  <line x1="280" y1="275" x2="370" y2="275" stroke="#e0e6f0" stroke-width="26" stroke-linecap="round"/>
+</svg>

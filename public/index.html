@@ -8,15 +8,13 @@
   <meta name="theme-color" content="#1a1a2e">
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="apple-touch-icon" href="/icon.svg">
   <title>Terminal Hub</title>
   <link rel="stylesheet" href="style.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-webgl@0.16.0/lib/xterm-addon-webgl.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-canvas@0.5.0/lib/xterm-addon-canvas.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/css/xterm.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.11.0/lib/addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.19.0/lib/addon-webgl.min.js"></script>
 </head>
 <body>
   <!-- Toast notification container -->
@@ -61,11 +59,10 @@
       </div>
       <!-- Expanded rows (hidden by default) -->
       <div id="vk-expanded" class="vk-expanded hidden">
-        <!-- Mode toggle: Shell / Claude / Links -->
+        <!-- Mode toggle: Shell / Claude -->
         <div class="vk-row vk-mode-toggle">
           <button class="vk-mode-btn" id="vk-mode-shell" onclick="switchVkMode('shell')">Shell</button>
           <button class="vk-mode-btn active" id="vk-mode-claude" onclick="switchVkMode('claude')">Claude</button>
-          <button class="vk-mode-btn" id="vk-mode-links" onclick="switchVkMode('links')">Links <span id="vk-links-badge" class="vk-links-badge hidden">0</span></button>
         </div>
 
         <!-- ===== Claude Code Keys ===== -->
@@ -93,13 +90,19 @@
           </div>
         </div>
 
-        <!-- ===== Shell Keys ===== -->
+        <!-- ===== Shell keys + snippets ===== -->
         <div id="vk-shell-keys" class="hidden">
           <div class="vk-shell-scrollback" title="Max scrollback lines (lower = faster after app switch)">
             <span class="vk-shell-scrollback-label">Buf</span>
             <input type="range" id="termhub-scrollback-range" min="10" max="1000" step="10" />
             <span class="vk-shell-scrollback-value" id="termhub-scrollback-value">300</span>
           </div>
+          <!-- User-defined snippets. Tap to send, long-press to edit. -->
+          <div class="vk-snippet-strip">
+            <div class="vk-snippet-row" id="vk-snippet-row"></div>
+            <button type="button" class="vk-snippet-add" id="vk-snippet-add" title="Add snippet">+</button>
+          </div>
+          <div class="vk-snippet-hint">Tap to send · Long-press to edit · Use <code>\n</code> <code>\t</code> <code>^C</code></div>
           <!-- Row 1: modifier toggles -->
           <div class="vk-row vk-modifiers">
             <button class="vk-key vk-toggle" data-mod="ctrl" id="vk-ctrl">Ctrl</button>
@@ -142,17 +145,6 @@
             <button class="vk-key vk-action" data-char="(">(</button>
             <button class="vk-key vk-action" data-char=")">)</button>
             <button class="vk-key vk-action" data-char=";">;</button>
-          </div>
-        </div>
-
-        <!-- ===== Links Panel ===== -->
-        <div id="vk-links-panel" class="hidden">
-          <div class="links-panel-header">
-            <span class="links-panel-title">Captured URLs & File Paths</span>
-            <button class="links-panel-clear" onclick="clearCapturedLinks()" title="Clear all">Clear</button>
-          </div>
-          <div id="links-panel-list" class="links-panel-list">
-            <div class="links-panel-empty">No links captured yet. URLs and file paths from terminal output will appear here.</div>
           </div>
         </div>
       </div>
@@ -202,11 +194,37 @@
       </div>
     </div>
 
+    <!-- Snippet editor modal -->
+    <div id="snippet-modal" class="modal hidden">
+      <div class="modal-backdrop" onclick="closeSnippetModal()"></div>
+      <div class="modal-content">
+        <h3 id="snippet-modal-title">Add Snippet</h3>
+        <label class="snippet-field-label">Label</label>
+        <input type="text" id="snippet-label" class="form-input" placeholder="e.g. git st" maxlength="24" />
+        <label class="snippet-field-label">Text to send</label>
+        <textarea id="snippet-text" class="form-input" rows="3" placeholder="git status&#10;Use \n for newline, \t for tab, ^C for Ctrl+C"></textarea>
+        <label class="snippet-enter-label"><input type="checkbox" id="snippet-enter" /> Press Enter after sending</label>
+        <div class="text-input-actions">
+          <button class="form-btn form-btn-cancel" onclick="closeSnippetModal()">Cancel</button>
+          <button class="form-btn form-btn-cancel" id="snippet-delete-btn" onclick="deleteSnippet()">Delete</button>
+          <button class="form-btn form-btn-save" onclick="saveSnippet()">Save</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Shell picker modal -->
     <div id="shell-modal" class="modal hidden">
       <div class="modal-backdrop" onclick="closeShellModal()"></div>
       <div class="modal-content">
         <h3>New Terminal</h3>
+        <div class="shell-modal-tmux" id="shell-modal-tmux-block">
+          <div class="shell-modal-tmux-head">
+            <span class="shell-modal-tmux-title">Background tmux</span>
+            <button type="button" class="shell-modal-tmux-refresh" id="tmux-sessions-refresh" title="Reload list">↻</button>
+          </div>
+          <div id="tmux-sessions-list" class="tmux-sessions-list"></div>
+          <p id="tmux-sessions-hint" class="tmux-sessions-hint hidden"></p>
+        </div>
         <div id="modal-shell-buttons">
           <!-- Populated dynamically based on server platform -->
         </div>
@@ -325,8 +343,7 @@
 
     async function fetchPlatform() {
       try {
-        const resp = await authFetch('/api/platform');
-        const data = await resp.json();
+        const data = await authFetchJson('/api/platform');
         serverPlatform = data.platform;
         availableShells = data.shells || [];
         defaultShell = data.defaultShell
@@ -392,6 +409,36 @@
       return resp;
     }
 
+    /**
+     * Safari / iOS WebKit: calling response.json() on empty or non‑JSON bodies often throws the
+     * vague DOMException “The string did not match the expected pattern.” Always read text() first.
+     */
+    async function authFetchJson(url, opts) {
+      const resp = await authFetch(url, opts);
+      const trimmed = ((await resp.text()) || '').trim();
+      let data = {};
+      if (trimmed) {
+        try {
+          data = JSON.parse(trimmed);
+        } catch (_) {
+          if (!resp.ok) {
+            const looksLikeHtml = /^\s*</.test(trimmed);
+            throw new Error(
+              looksLikeHtml
+                ? `Server routing error (${resp.status}). Reload the hub or restart Node after updating server.js.`
+                : (trimmed.length > 200 ? trimmed.slice(0, 200) + '\u2026' : trimmed)
+            );
+          }
+          throw new Error('Could not parse server response.');
+        }
+      }
+      if (!resp.ok) {
+        const msg = data && (data.error || data.message);
+        throw new Error(msg ? String(msg) : `HTTP ${resp.status}`);
+      }
+      return data;
+    }
+
     // ---- Modal animation helpers ----
     function openModal(id) {
       const el = document.getElementById(id);
@@ -416,10 +463,82 @@
     // ---- Shell modal ----
     function openShellModal() {
       openModal('shell-modal');
+      loadTmuxSessions();
     }
     function closeShellModal() {
       closeModal('shell-modal');
     }
+
+    async function fetchTmuxSessionsWithFallback() {
+      const urls = ['/api/terminal/tmux-sessions', '/api/tmux/sessions'];
+      let lastErr = null;
+      for (const url of urls) {
+        try {
+          return await authFetchJson(url);
+        } catch (e) {
+          lastErr = e;
+          const m = String(e && e.message ? e.message : e);
+          const looksLikeMissingRoute = /routing error \(404\)/i.test(m) || /\bHTTP 404\b/i.test(m);
+          if (!looksLikeMissingRoute) throw e;
+        }
+      }
+      throw lastErr || new Error('Failed to list tmux sessions');
+    }
+
+    async function loadTmuxSessions() {
+      const listEl = document.getElementById('tmux-sessions-list');
+      const hintEl = document.getElementById('tmux-sessions-hint');
+      if (!listEl || !hintEl) return;
+      listEl.innerHTML = '<div class="tmux-loading">Loading…</div>';
+      hintEl.classList.add('hidden');
+      hintEl.textContent = '';
+      try {
+        const data = await fetchTmuxSessionsWithFallback();
+        listEl.innerHTML = '';
+        if (!data.tmuxInstalled) {
+          hintEl.textContent = data.hint || 'tmux unavailable on this hub.';
+          hintEl.classList.remove('hidden');
+          return;
+        }
+        const sess = data.sessions || [];
+        if (sess.length === 0) {
+          hintEl.textContent = data.hint || 'No background tmux sessions.';
+          hintEl.classList.remove('hidden');
+          return;
+        }
+        hintEl.classList.add('hidden');
+        for (const row of sess) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'modal-tmux-session-btn';
+          btn.textContent = row.name + (row.attached ? ' \u2022 attached' : '');
+          btn.title = row.attached
+            ? 'This session already has an attached client (shared / multi‑attach)'
+            : 'Attach to tmux session';
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            pickTmuxSession(row.name);
+          });
+          listEl.appendChild(btn);
+        }
+      } catch (err) {
+        listEl.innerHTML = '';
+        hintEl.textContent = err.message ? String(err.message) : 'Failed to list tmux sessions.';
+        hintEl.classList.remove('hidden');
+      }
+    }
+
+    function pickTmuxSession(name) {
+      closeShellModal();
+      createTerminal('bash', '', { tmuxSession: name });
+    }
+
+    document.getElementById('tmux-sessions-refresh').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      loadTmuxSessions();
+    });
 
     // ---- Recent directories (localStorage) ----
     const RECENT_DIRS_KEY = 'termhub_recent_dirs';
@@ -1627,9 +1746,8 @@
 
     // Expand/collapse extra rows
     let vkExpanded = false;
-    const VK_MODES = ['claude', 'shell', 'links'];
     function updateModeLabel() {
-      const labelNames = { claude: 'Claude', shell: 'Shell', links: 'Links' };
+      const labelNames = { claude: 'Claude', shell: 'Shell' };
       document.getElementById('vk-mode-label').textContent = labelNames[vkMode] || 'Claude';
     }
 
@@ -1643,6 +1761,157 @@
         setTimeout(() => fitAndKeepScroll(sessions[activeId]), 100);
       }
     });
+
+    // ---- Shell snippet strip ----
+    const DEFAULT_SNIPPETS = [
+      { label: 'ls', text: 'ls -la', enter: true },
+      { label: 'git st', text: 'git status', enter: true },
+      { label: 'git d', text: 'git diff', enter: true },
+      { label: 'clear', text: '^L' },
+      { label: '^C', text: '^C' },
+      { label: '^D', text: '^D' },
+      { label: '^R', text: '^R' },
+      { label: 'cd ~', text: 'cd ~', enter: true },
+    ];
+    const SNIPPETS_KEY = 'termhub_snippets_v1';
+    let snippets = [];
+    let editingSnippetIdx = -1;
+
+    function loadSnippets() {
+      try {
+        const raw = localStorage.getItem(SNIPPETS_KEY);
+        if (raw) { snippets = JSON.parse(raw); return; }
+      } catch (_) {}
+      snippets = DEFAULT_SNIPPETS.slice();
+    }
+    function persistSnippets() {
+      try { localStorage.setItem(SNIPPETS_KEY, JSON.stringify(snippets)); } catch (_) {}
+    }
+    function expandSnippet(text) {
+      let out = '';
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === '\\' && i + 1 < text.length) {
+          const n = text[i + 1];
+          if (n === 'n') { out += '\n'; i++; continue; }
+          if (n === 'r') { out += '\r'; i++; continue; }
+          if (n === 't') { out += '\t'; i++; continue; }
+          if (n === '\\') { out += '\\'; i++; continue; }
+        }
+        if (c === '^' && i + 1 < text.length) {
+          const n = text[i + 1].toUpperCase();
+          if (n >= 'A' && n <= 'Z') {
+            out += String.fromCharCode(n.charCodeAt(0) - 64);
+            i++; continue;
+          }
+        }
+        out += c;
+      }
+      return out;
+    }
+    function renderSnippets() {
+      const row = document.getElementById('vk-snippet-row');
+      if (!row) return;
+      row.innerHTML = '';
+      snippets.forEach((sn, idx) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'vk-snippet';
+        btn.textContent = sn.label || sn.text.slice(0, 10);
+        btn.dataset.snippetIdx = idx;
+        row.appendChild(btn);
+      });
+    }
+    function sendSnippetAt(idx) {
+      const sn = snippets[idx];
+      if (!sn) return;
+      let payload = expandSnippet(sn.text);
+      if (sn.enter) payload += '\r';
+      sendKey(payload);
+    }
+
+    // Long-press vs tap on snippet row
+    let snippetLongPressTimer = null;
+    let snippetLongPressFired = false;
+    (function wireSnippetRow() {
+      const row = document.getElementById('vk-snippet-row');
+      if (!row) return;
+      const clear = () => {
+        if (snippetLongPressTimer) { clearTimeout(snippetLongPressTimer); snippetLongPressTimer = null; }
+      };
+      row.addEventListener('pointerdown', (e) => {
+        const btn = e.target.closest('[data-snippet-idx]');
+        if (!btn) return;
+        snippetLongPressFired = false;
+        clear();
+        snippetLongPressTimer = setTimeout(() => {
+          snippetLongPressFired = true;
+          haptic(30);
+          openSnippetModal(parseInt(btn.dataset.snippetIdx));
+        }, 500);
+      });
+      ['pointerup', 'pointerleave', 'pointercancel', 'pointermove'].forEach(ev => {
+        row.addEventListener(ev, (e) => {
+          if (ev === 'pointermove') {
+            // Cancel long-press if finger moved (scrolling)
+            if (snippetLongPressTimer) clear();
+            return;
+          }
+          clear();
+        });
+      });
+      row.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-snippet-idx]');
+        if (!btn) return;
+        e.preventDefault(); e.stopPropagation();
+        if (snippetLongPressFired) { snippetLongPressFired = false; return; }
+        haptic();
+        sendSnippetAt(parseInt(btn.dataset.snippetIdx));
+      }, true);
+    })();
+
+    document.getElementById('vk-snippet-add').addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      openSnippetModal(-1);
+    });
+
+    function openSnippetModal(idx) {
+      editingSnippetIdx = idx;
+      const isEdit = idx >= 0;
+      document.getElementById('snippet-modal-title').textContent = isEdit ? 'Edit Snippet' : 'Add Snippet';
+      document.getElementById('snippet-delete-btn').style.display = isEdit ? '' : 'none';
+      const sn = isEdit ? snippets[idx] : { label: '', text: '', enter: true };
+      document.getElementById('snippet-label').value = sn.label || '';
+      document.getElementById('snippet-text').value = sn.text || '';
+      document.getElementById('snippet-enter').checked = !!sn.enter;
+      document.getElementById('snippet-modal').classList.remove('hidden');
+      setTimeout(() => document.getElementById('snippet-text').focus(), 50);
+    }
+    function closeSnippetModal() {
+      document.getElementById('snippet-modal').classList.add('hidden');
+      editingSnippetIdx = -1;
+    }
+    function saveSnippet() {
+      const label = document.getElementById('snippet-label').value.trim();
+      const text = document.getElementById('snippet-text').value;
+      const enter = document.getElementById('snippet-enter').checked;
+      if (!text) return;
+      const entry = { label: label || text.slice(0, 10), text, enter };
+      if (editingSnippetIdx >= 0) snippets[editingSnippetIdx] = entry;
+      else snippets.push(entry);
+      persistSnippets();
+      renderSnippets();
+      closeSnippetModal();
+    }
+    function deleteSnippet() {
+      if (editingSnippetIdx < 0) return;
+      snippets.splice(editingSnippetIdx, 1);
+      persistSnippets();
+      renderSnippets();
+      closeSnippetModal();
+    }
+    loadSnippets();
+    renderSnippets();
 
     // ---- Text Input Modal (for iOS voice / IME) ----
     document.getElementById('vk-voice-btn').addEventListener('click', (e) => {
@@ -2019,17 +2288,15 @@
 
     // ---- Virtual keyboard mode toggle (Shell / Claude) ----
     let vkMode = localStorage.getItem('termhub_vk_mode') || 'claude';
+    if (vkMode === 'links') vkMode = 'claude';
 
     function switchVkMode(mode) {
       vkMode = mode;
-      // Only persist shell/claude preference (not links — it's a temporary view)
-      if (mode !== 'links') localStorage.setItem('termhub_vk_mode', mode);
+      localStorage.setItem('termhub_vk_mode', mode);
       document.getElementById('vk-claude-keys').classList.toggle('hidden', mode !== 'claude');
       document.getElementById('vk-shell-keys').classList.toggle('hidden', mode !== 'shell');
-      document.getElementById('vk-links-panel').classList.toggle('hidden', mode !== 'links');
       document.getElementById('vk-mode-claude').classList.toggle('active', mode === 'claude');
       document.getElementById('vk-mode-shell').classList.toggle('active', mode === 'shell');
-      document.getElementById('vk-mode-links').classList.toggle('active', mode === 'links');
       updateModeLabel();
       // Re-fit terminal after keyboard layout change
       if (activeId && sessions[activeId]) {
@@ -2040,59 +2307,6 @@
     // Apply saved mode on load
     switchVkMode(vkMode);
 
-    // ---- Links panel rendering ----
-    function renderLinksPanel() {
-      const list = document.getElementById('links-panel-list');
-      const badge = document.getElementById('vk-links-badge');
-
-      // Update badge count
-      badge.textContent = capturedLinks.length;
-      badge.classList.toggle('hidden', capturedLinks.length === 0);
-
-      if (capturedLinks.length === 0) {
-        list.innerHTML = '<div class="links-panel-empty">No links captured yet. URLs and file paths from terminal output will appear here.</div>';
-        return;
-      }
-
-      const frag = document.createDocumentFragment();
-      for (const link of capturedLinks) {
-        const row = document.createElement('div');
-        row.className = 'links-panel-row';
-        row.dataset.type = link.type;
-
-        const icon = document.createElement('span');
-        icon.className = 'links-panel-icon';
-        icon.textContent = link.type === 'url' ? '🌐' : '📄';
-
-        const text = document.createElement('span');
-        text.className = 'links-panel-text';
-        text.textContent = link.text;
-        text.title = link.text;
-
-        row.appendChild(icon);
-        row.appendChild(text);
-
-        row.addEventListener('click', () => {
-          if (link.type === 'url') {
-            window.open(link.text, '_blank', 'noopener');
-          } else {
-            openFileInViewer(link.text);
-          }
-        });
-
-        frag.appendChild(row);
-      }
-
-      list.innerHTML = '';
-      list.appendChild(frag);
-    }
-
-    function clearCapturedLinks() {
-      capturedLinks.length = 0;
-      capturedLinksSet.clear();
-      renderLinksPanel();
-    }
-
     // ---- Terminal theme (single source of truth) ----
     const TERMINAL_THEME = {
       background: '#0a192f',
@@ -2100,6 +2314,18 @@
       cursor: '#64ffda',
       selectionBackground: '#1f4068'
     };
+
+    /** Matches FitAddon probe + live terminal so PTY.cols tracks visual cell width on each OS */
+    const TERMINAL_FONT_FAMILY = (() => {
+      const ua = navigator.userAgent || '';
+      if (navigator.maxTouchPoints > 0 && /iPhone|iPad|iPod/i.test(ua)) {
+        return "'Menlo','SF Mono','Courier New','Consolas',monospace";
+      }
+      if (navigator.maxTouchPoints > 0 && /Android/i.test(ua)) {
+        return "'Droid Sans Mono','Courier New','Consolas',monospace";
+      }
+      return "'Cascadia Code','Fira Code','Consolas','Courier New',monospace";
+    })();
 
     const SCROLLBACK_STORAGE_KEY = 'termhub_scrollback_lines';
     const SCROLLBACK_MIN = 10;
@@ -2127,12 +2353,26 @@
 
     // ---- Zoom: step font sizes ----
     const ZOOM_LEVELS = [9, 11, 13, 16, 20];
-    // Default: 11px for all devices
-    let zoomIndex = 1;
+    const ZOOM_MIN_INDEX = 0;
+    const ZOOM_MAX_INDEX = ZOOM_LEVELS.length - 1;
+    function clampZoomIndex(i) {
+      return Math.max(ZOOM_MIN_INDEX, Math.min(ZOOM_MAX_INDEX, i));
+    }
+    let zoomIndex = clampZoomIndex(1);
+
+    function syncZoomButtons() {
+      const down = document.getElementById('vk-zoom-down');
+      const up = document.getElementById('vk-zoom-up');
+      if (!down || !up) return;
+      down.disabled = zoomIndex <= ZOOM_MIN_INDEX;
+      up.disabled = zoomIndex >= ZOOM_MAX_INDEX;
+    }
 
     function applyZoom() {
+      zoomIndex = clampZoomIndex(zoomIndex);
       const size = ZOOM_LEVELS[zoomIndex];
       document.getElementById('vk-zoom-label').textContent = size + 'px';
+      syncZoomButtons();
       // Apply to all terminal sessions (skip file viewers)
       for (const [id, s] of Object.entries(sessions)) {
         if (!s.terminal) continue;
@@ -2143,15 +2383,16 @@
 
     document.getElementById('vk-zoom-down').addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
-      if (zoomIndex > 0) { zoomIndex--; applyZoom(); }
+      if (zoomIndex > ZOOM_MIN_INDEX) { zoomIndex--; applyZoom(); }
     });
     document.getElementById('vk-zoom-up').addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
-      if (zoomIndex < ZOOM_LEVELS.length - 1) { zoomIndex++; applyZoom(); }
+      if (zoomIndex < ZOOM_MAX_INDEX) { zoomIndex++; applyZoom(); }
     });
 
     // Initialize zoom label
     document.getElementById('vk-zoom-label').textContent = ZOOM_LEVELS[zoomIndex] + 'px';
+    syncZoomButtons();
 
     (function initScrollbackUI() {
       const range = document.getElementById('termhub-scrollback-range');
@@ -2203,11 +2444,11 @@
         let newIndex = initialZoomIndex;
         if (ratio > 1.3) newIndex = Math.min(initialZoomIndex + 1, ZOOM_LEVELS.length - 1);
         if (ratio > 1.7) newIndex = Math.min(initialZoomIndex + 2, ZOOM_LEVELS.length - 1);
-        if (ratio < 0.75) newIndex = Math.max(initialZoomIndex - 1, 0);
-        if (ratio < 0.55) newIndex = Math.max(initialZoomIndex - 2, 0);
+        if (ratio < 0.75) newIndex = Math.max(initialZoomIndex - 1, ZOOM_MIN_INDEX);
+        if (ratio < 0.55) newIndex = Math.max(initialZoomIndex - 2, ZOOM_MIN_INDEX);
 
         if (newIndex !== zoomIndex) {
-          zoomIndex = newIndex;
+          zoomIndex = clampZoomIndex(newIndex);
           applyZoom();
           haptic(5);
         }
@@ -2284,6 +2525,73 @@
       });
     }
 
+    function clearFitBackoffTimers(s) {
+      if (!s || !Array.isArray(s._fitBackoffTids)) return;
+      for (const tid of s._fitBackoffTids) clearTimeout(tid);
+      s._fitBackoffTids = [];
+    }
+
+    /** When safeFit rejects a transient narrow layout (iOS keyboard), retry so PTY cols match grid. */
+    function scheduleFitBackoffRetries(s) {
+      if (!s?.terminal || !navigator.maxTouchPoints) return;
+      clearFitBackoffTimers(s);
+      s._fitBackoffTids = [];
+      const delays = [120, 360, 900];
+      for (const ms of delays) {
+        const tid = setTimeout(() => {
+          if (!s.terminal) return;
+          fitAndKeepScroll(s);
+        }, ms);
+        s._fitBackoffTids.push(tid);
+      }
+    }
+
+    /** Push current term.cols × rows to PTY (deduped — onResize + post-fit paths both call this). */
+    function resizePtyColsIfChanged(s) {
+      if (!s?.terminal || !s.ws || s.ws.readyState !== WebSocket.OPEN) return;
+      try {
+        const cols = s.terminal.cols;
+        const rows = s.terminal.rows;
+        if (!Number.isFinite(cols) || !Number.isFinite(rows)) return;
+        const sig = `${cols}:${rows}`;
+        if (s._ptyGeomSig === sig) return;
+        s._ptyGeomSig = sig;
+        s.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+      } catch (_) {}
+    }
+
+    /** Observe mounted terminal containers — catches iOS keyboard / layout jitter better than window.resize alone. */
+    function attachTerminalResizeObserver(s) {
+      if (!s?.container || typeof ResizeObserver === 'undefined') return;
+      try {
+        if (s._resizeObserver) s._resizeObserver.disconnect();
+      } catch (_) {}
+      let debTimer = null;
+      s._resizeObserver = new ResizeObserver(() => {
+        if (!s.terminal) return;
+        const st = getComputedStyle(s.container);
+        if (st.display === 'none') return;
+        if ((s.container.clientWidth || 0) < 8 || (s.container.clientHeight || 0) < 8) return;
+        clearTimeout(debTimer);
+        debTimer = setTimeout(() => {
+          debTimer = null;
+          if (!s.terminal) return;
+          if (getComputedStyle(s.container).display === 'none') return;
+          fitAndKeepScroll(s);
+        }, 42);
+      });
+      s._resizeObserver.observe(s.container);
+    }
+
+    function detachTerminalResizeObserver(s) {
+      try {
+        if (s?._resizeObserver) {
+          s._resizeObserver.disconnect();
+          s._resizeObserver = null;
+        }
+      } catch (_) {}
+    }
+
     // ---- Safe fit: prevent destructive narrow reflows ----
     // On mobile (especially iOS PWA), app-switch / keyboard animations can
     // transiently shrink the container. If fit() runs at that moment, xterm
@@ -2318,12 +2626,14 @@
       s._suppressScrollTrack = true;
       if (!safeFit(s)) {
         s._suppressScrollTrack = false;
+        scheduleFitBackoffRetries(s);
         return;
       }
+      clearFitBackoffTimers(s);
       if (shouldSnap) {
         s.terminal.scrollToBottom();
       }
-      // Force full repaint — WebGL/Canvas renderers can leave stale content
+      // Force full repaint — WebGL renderer can leave stale content
       // after row count changes (e.g. keyboard dismiss on mobile)
       requestAnimationFrame(() => {
         try {
@@ -2331,8 +2641,23 @@
           if (typeof t.refresh === 'function') t.refresh(0, t.rows - 1);
         } catch (_) {}
         if (shouldSnap) s.terminal.scrollToBottom();
+        resizePtyColsIfChanged(s);
         s._suppressScrollTrack = false;
       });
+    }
+
+    /** After open(), WebGL metrics can settle after fonts; re-fit so PTY cols match the real grid. */
+    function scheduleInitialTerminalGeometryFix(s) {
+      if (!s?.terminal || !s.fitAddon) return;
+      const run = () => {
+        try {
+          fitAndKeepScroll(s);
+        } catch (_) {}
+      };
+      requestAnimationFrame(() => requestAnimationFrame(run));
+      try {
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(run).catch(() => {});
+      } catch (_) {}
     }
 
     // ---- Reflow helper: force xterm to re-render properly ----
@@ -2350,6 +2675,7 @@
         safeFit(s);
         if (shouldSnap) s.terminal.scrollToBottom();
         s._suppressScrollTrack = false;
+        resizePtyColsIfChanged(s);
         if (callback) callback();
       });
     }
@@ -2414,24 +2740,25 @@
 
     // ---- iOS touch scroll fix for xterm.js ----
     // xterm.js intercepts touch events for selection, making scroll nearly
-    // impossible on iOS.  We add a custom touchmove handler on the viewport
-    // ---- GPU-accelerated renderer (WebGL → Canvas → DOM fallback) ----
-    // WebGL gives ~900% faster rendering; Canvas is a good middle ground.
-    // Both dramatically improve layout stability during long output (e.g. Claude Code).
+    // impossible on iOS. We add a custom touchmove handler on the viewport (see patchIOSTouchScroll).
+
+    // ---- GPU-accelerated renderer (WebGL2 on desktop; DOM on iOS / fallback) ----
+    // xterm 6 dropped the Canvas addon; use WebGL2 or the built-in DOM renderer.
     function loadBestRenderer(term) {
       // iOS Safari has a glyph-clipping bug with xterm.js WebGL renderer
       // (bottom-right of each character gets cut). Skip WebGL on iOS.
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
                     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      // Try WebGL first (requires WebGL2 context)
       if (!isIOS && typeof WebglAddon !== 'undefined') {
         try {
           const webgl = new WebglAddon.WebglAddon();
           webgl.onContextLoss(() => {
-            // If WebGL context is lost, fall back to canvas or DOM
-            console.warn('[renderer] WebGL context lost, disposing');
-            webgl.dispose();
-            loadCanvasRenderer(term);
+            console.warn('[renderer] WebGL context lost, falling back to DOM');
+            try { webgl.dispose(); } catch (_) {}
+            try {
+              const t = term;
+              if (typeof t.refresh === 'function' && t.rows > 0) t.refresh(0, t.rows - 1);
+            } catch (_) {}
           });
           term.loadAddon(webgl);
           console.log('[renderer] WebGL renderer loaded');
@@ -2440,22 +2767,65 @@
           console.warn('[renderer] WebGL not available:', e.message);
         }
       }
-      return loadCanvasRenderer(term);
+      console.log('[renderer] Using DOM renderer');
+      return 'dom';
     }
 
-    function loadCanvasRenderer(term) {
-      if (typeof CanvasAddon !== 'undefined') {
-        try {
-          const canvas = new CanvasAddon.CanvasAddon();
-          term.loadAddon(canvas);
-          console.log('[renderer] Canvas renderer loaded');
-          return 'canvas';
-        } catch (e) {
-          console.warn('[renderer] Canvas not available:', e.message);
-        }
+    function findSessionForTerminal(term) {
+      for (const s of Object.values(sessions)) {
+        if (!s || s.type === 'file' || !s.terminal) continue;
+        if (s.terminal === term) return s;
       }
-      console.log('[renderer] Using default DOM renderer');
-      return 'dom';
+      return null;
+    }
+
+    /** 1-based shell cell under (cx,cy); used for tmux mouse wheel SGR payloads. */
+    function clientPointToTerminalCell(term, container, cx, cy) {
+      const nCols = term.cols || 80;
+      const nRows = term.rows || 24;
+      const xtermEl = container.querySelector('.xterm');
+      if (!xtermEl) {
+        return { col: Math.max(1, Math.floor(nCols / 2)), row: Math.max(1, Math.floor(nRows / 2)) };
+      }
+      const rect = xtermEl.getBoundingClientRect();
+      const pad = 2;
+      const usableW = Math.max(1, rect.width - 2 * pad);
+      const usableH = Math.max(1, rect.height - 2 * pad);
+      const relX = Math.max(0, cx - rect.left - pad);
+      const relY = Math.max(0, cy - rect.top - pad);
+      const cellW = usableW / nCols;
+      const cellH = usableH / nRows;
+      let col = Math.floor(relX / cellW) + 1;
+      let row = Math.floor(relY / cellH) + 1;
+      col = Math.max(1, Math.min(nCols, col));
+      row = Math.max(1, Math.min(nRows, row));
+      return { col, row };
+    }
+
+    /**
+     * iOS WebKit ignores synthetic WheelEvent for programs using the alternate screen (tmux, etc.).
+     * Send xterm SGR-extended wheel codes (buttons 64/65), which tmux handles when mouse mode is on.
+     */
+    function sendSgrMouseWheelScrollToPty(term, container, fingerDeltaYpx, cx, cy) {
+      const s = findSessionForTerminal(term);
+      if (!s?.ws || s.ws.readyState !== WebSocket.OPEN) return false;
+      if (!fingerDeltaYpx) return true;
+      const lh = (term.options.fontSize || 13) * 1.2;
+      let steps = Math.round(Math.abs(fingerDeltaYpx) / lh);
+      if (steps < 1) steps = 1;
+      steps = Math.min(steps, 24);
+      const { col, row } = clientPointToTerminalCell(term, container, cx, cy);
+      const btn = fingerDeltaYpx > 0 ? 64 : 65;
+      let payload = '';
+      for (let i = 0; i < steps; i++) {
+        payload += `\x1b[<${btn};${col};${row}M`;
+      }
+      try {
+        s.ws.send(JSON.stringify({ type: 'input', data: payload }));
+      } catch (_) {
+        return false;
+      }
+      return true;
     }
 
     // Calls term.scrollLines() based on finger delta, giving smooth
@@ -2474,6 +2844,8 @@
       let velocityY = 0;       // px/ms
       let scrolling = false;
       let inertiaRAF = 0;
+      let wheelTouchCx = 0;
+      let wheelTouchCy = 0;
 
       container.addEventListener('touchstart', (e) => {
         if (e.touches.length === 1) {
@@ -2481,6 +2853,8 @@
           if (inertiaRAF) { cancelAnimationFrame(inertiaRAF); inertiaRAF = 0; }
           touchStartY = e.touches[0].clientY;
           lastY = touchStartY;
+          wheelTouchCx = e.touches[0].clientX;
+          wheelTouchCy = e.touches[0].clientY;
           lastTime = Date.now();
           velocityY = 0;
           scrolling = false;
@@ -2491,6 +2865,10 @@
         if (e.touches.length !== 1) return;
 
         const currentY = e.touches[0].clientY;
+        const cx = e.touches[0].clientX;
+        const cy = e.touches[0].clientY;
+        wheelTouchCx = cx;
+        wheelTouchCy = cy;
         const now = Date.now();
         const deltaFromStart = Math.abs(currentY - touchStartY);
         const deltaFromLast = lastY - currentY;
@@ -2506,8 +2884,18 @@
           const instantV = deltaFromLast / dt;
           velocityY = velocityY * 0.4 + instantV * 0.6;
 
-          // Convert pixel delta to lines (roughly fontSize * 1.2 per line)
           const lineHeight = (term.options.fontSize || 13) * 1.2;
+          /* Alternate buffer: bypass xterm viewport + fake wheel (broken on Safari); PTY sees real mouse escapes. */
+          if (isAlternateScreenTerminal(term)) {
+            if (Math.abs(deltaFromLast) >= 0.25) {
+              sendSgrMouseWheelScrollToPty(term, container, deltaFromLast, cx, cy);
+              lastY = currentY;
+            }
+            lastTime = now;
+            e.preventDefault();
+            return;
+          }
+
           const lines = Math.round(deltaFromLast / lineHeight);
           if (lines !== 0) {
             term.scrollLines(lines);
@@ -2540,7 +2928,17 @@
           residual += v * frameDt;
           const lines = Math.trunc(residual / lineHeight);
           if (lines !== 0) {
-            term.scrollLines(lines);
+            if (isAlternateScreenTerminal(term)) {
+              sendSgrMouseWheelScrollToPty(
+                term,
+                container,
+                Math.sign(lines) * Math.abs(lines) * lineHeight,
+                wheelTouchCx,
+                wheelTouchCy
+              );
+            } else {
+              term.scrollLines(lines);
+            }
             residual -= lines * lineHeight;
           }
           inertiaRAF = requestAnimationFrame(inertiaStep);
@@ -2551,29 +2949,77 @@
 
     // ---- Terminal management ----
 
-    async function createTerminal(shell, cwd) {
+    /** Fit a throwaway xterm in a ghost box sized like #terminal-area so PTY spawns at real cols × rows before WebSocket connects. */
+    function probeTerminalGridDimensions() {
+      const area = document.getElementById('terminal-area');
+      const w = Math.max(1, Math.floor(area.clientWidth || 640));
+      const h = Math.max(1, Math.floor(area.clientHeight || 480));
+      const ghost = document.createElement('div');
+      ghost.setAttribute('aria-hidden', 'true');
+      ghost.style.cssText =
+        `position:fixed;left:-10000px;top:0;width:${w}px;height:${h}px;overflow:hidden;visibility:hidden;pointer-events:none`;
+      document.body.appendChild(ghost);
+      const padBox = document.createElement('div');
+      padBox.style.cssText = 'box-sizing:border-box;width:100%;height:100%;padding:2px';
+      ghost.appendChild(padBox);
+      let term = null;
+      try {
+        term = new Terminal({
+          cursorBlink: false,
+          fontSize: ZOOM_LEVELS[zoomIndex],
+          fontFamily: TERMINAL_FONT_FAMILY,
+          letterSpacing: 0,
+          scrollback: 1,
+          allowProposedApi: true
+        });
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(padBox);
+        loadBestRenderer(term);
+        fitAddon.fit();
+        let cols = term.cols;
+        let rows = term.rows;
+        if (!Number.isFinite(cols) || cols < MIN_FIT_COLS) cols = 80;
+        if (!Number.isFinite(rows) || rows < 2) rows = 24;
+        return { cols, rows };
+      } finally {
+        try {
+          if (term) term.dispose();
+        } catch (_) {}
+        ghost.remove();
+      }
+    }
+
+    async function createTerminal(shell, cwd, opts) {
+      opts = opts || {};
       if (!shell) shell = defaultShell;
       showToast('Starting terminal...', 'info');
 
-      const body = { shell, cols: 80, rows: 24 };
+      const dims = probeTerminalGridDimensions();
+      const body = { shell, cols: dims.cols, rows: dims.rows };
       if (cwd) body.cwd = cwd;
+      if (opts.tmuxSession) body.tmuxSession = opts.tmuxSession;
 
       try {
-        const resp = await authFetch('/api/terminal/new', {
+        const data = await authFetchJson('/api/terminal/new', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         });
-        const data = await resp.json();
-        if (data.error) throw new Error(data.error);
-
         const id = data.id;
 
-        // Build tab label — append last dir segment if custom cwd
-        let tabLabel = `${getShellName(shell)} #${id}`;
-        if (cwd) {
-          const lastSeg = cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
-          if (lastSeg) tabLabel += ` \u00B7 ${lastSeg}`;
+        let tabLabel;
+        let tabIconStr;
+        if (opts.tmuxSession) {
+          tabIconStr = '\u229E';
+          tabLabel = `tmux ${opts.tmuxSession} #${id}`;
+        } else {
+          tabLabel = `${getShellName(shell)} #${id}`;
+          if (cwd) {
+            const lastSeg = cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+            if (lastSeg) tabLabel += ` \u00B7 ${lastSeg}`;
+          }
+          tabIconStr = getShellIcon(shell);
         }
 
         // Create tab
@@ -2581,7 +3027,7 @@
         tabEl.className = 'tab';
         tabEl.dataset.id = id;
         tabEl.innerHTML = `
-          <span class="tab-icon">${getShellIcon(shell)}</span>
+          <span class="tab-icon">${tabIconStr}</span>
           <span class="tab-label">${tabLabel}</span>
           <button class="tab-close" title="Close">&times;</button>
         `;
@@ -2604,7 +3050,8 @@
         const term = new Terminal({
           cursorBlink: true,
           fontSize: ZOOM_LEVELS[zoomIndex],
-          fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
+          fontFamily: TERMINAL_FONT_FAMILY,
+          letterSpacing: 0,
           theme: TERMINAL_THEME,
           allowProposedApi: true,
           scrollback: getScrollbackLines(),
@@ -2614,10 +3061,6 @@
 
         const fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
-        try {
-          const webLinksAddon = new WebLinksAddon.WebLinksAddon();
-          term.loadAddon(webLinksAddon);
-        } catch(e) {}
 
         term.open(container);
         const renderer = loadBestRenderer(term);
@@ -2628,6 +3071,8 @@
         initScrollTracking(sessions[id]);
         tabEl.classList.add('tab-disconnected');
         container.classList.add('terminal-disconnected');
+        attachTerminalResizeObserver(sessions[id]);
+        scheduleInitialTerminalGeometryFix(sessions[id]);
         connectWs(id);
 
         term.onData((data) => {
@@ -2637,12 +3082,7 @@
           }
         });
 
-        term.onResize(({ cols, rows }) => {
-          const s = sessions[id];
-          if (s && s.ws && s.ws.readyState === WebSocket.OPEN) {
-            s.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-          }
-        });
+        term.onResize(() => resizePtyColsIfChanged(sessions[id]));
         document.getElementById('welcome').style.display = 'none';
         switchTab(id);
         updateCount();
@@ -2652,61 +3092,7 @@
       }
     }
 
-    // ---- Link detection from terminal output ----
-    const FILE_PATH_REGEX = /(?:[A-Za-z]:[\\\/]|\/(?!\/)|~\/|\.\/|\.\.\/)[^\s:,"'`()\[\]{}|<>]+\.\w+(?::\d+(?::\d+)?)?/g;
-    const URL_REGEX = /https?:\/\/[^\s"'`<>()[\]{}]+/gi;
     let nextFileViewerId = 10000;
-
-    // Captured links: { text, type: 'url'|'file', timestamp }
-    const capturedLinks = [];
-    const MAX_CAPTURED_LINKS = 100;
-    const capturedLinksSet = new Set(); // deduplicate by text
-
-    // Strip ANSI escape codes from terminal output before scanning
-    function stripAnsi(str) {
-      return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
-                .replace(/\x1b\][^\x07]*\x07/g, '')
-                .replace(/\x1b[()][AB012]/g, '')
-                .replace(/\x1b[\x20-\x2F][\x30-\x7E]/g, '');
-    }
-
-    function scanOutputForLinks(rawData) {
-      const data = stripAnsi(rawData);
-      let found = false;
-
-      // Scan for URLs
-      URL_REGEX.lastIndex = 0;
-      let match;
-      while ((match = URL_REGEX.exec(data)) !== null) {
-        let url = match[0];
-        // Trim trailing punctuation that's likely not part of URL
-        url = url.replace(/[.,;:!?)]+$/, '');
-        if (!capturedLinksSet.has(url)) {
-          capturedLinksSet.add(url);
-          capturedLinks.unshift({ text: url, type: 'url', timestamp: Date.now() });
-          found = true;
-        }
-      }
-
-      // Scan for file paths
-      FILE_PATH_REGEX.lastIndex = 0;
-      while ((match = FILE_PATH_REGEX.exec(data)) !== null) {
-        const fp = match[0];
-        if (!capturedLinksSet.has(fp)) {
-          capturedLinksSet.add(fp);
-          capturedLinks.unshift({ text: fp, type: 'file', timestamp: Date.now() });
-          found = true;
-        }
-      }
-
-      // Trim to max
-      while (capturedLinks.length > MAX_CAPTURED_LINKS) {
-        const removed = capturedLinks.pop();
-        capturedLinksSet.delete(removed.text);
-      }
-
-      if (found) renderLinksPanel();
-    }
 
     async function openFileInViewer(rawPath) {
       // Strip line:col suffix
@@ -2904,6 +3290,10 @@
       }
 
       if (sessions[id]) {
+        const sess = sessions[id];
+        clearFitBackoffTimers(sess);
+        if (sess._vvFitFollowTmo) clearTimeout(sess._vvFitFollowTmo);
+        detachTerminalResizeObserver(sess);
         // Clear any pending reconnect timer and overlay
         if (sessions[id]._reconnectTimer) clearTimeout(sessions[id]._reconnectTimer);
         if (sessions[id]._countdownInterval) clearInterval(sessions[id]._countdownInterval);
@@ -3039,7 +3429,8 @@
       const term = new Terminal({
         cursorBlink: true,
         fontSize: ZOOM_LEVELS[zoomIndex],
-        fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
+        fontFamily: TERMINAL_FONT_FAMILY,
+        letterSpacing: 0,
         theme: TERMINAL_THEME,
         allowProposedApi: true,
         scrollback: getScrollbackLines(),
@@ -3049,10 +3440,6 @@
 
       const fitAddon = new FitAddon.FitAddon();
       term.loadAddon(fitAddon);
-      try {
-        const webLinksAddon = new WebLinksAddon.WebLinksAddon();
-        term.loadAddon(webLinksAddon);
-      } catch(e) {}
 
       term.open(container);
       const renderer = loadBestRenderer(term);
@@ -3063,6 +3450,8 @@
       initScrollTracking(sessions[id]);
       tabEl.classList.add('tab-disconnected');
       container.classList.add('terminal-disconnected');
+      attachTerminalResizeObserver(sessions[id]);
+      scheduleInitialTerminalGeometryFix(sessions[id]);
       connectWs(id);
 
       term.onData((data) => {
@@ -3072,12 +3461,7 @@
         }
       });
 
-      term.onResize(({ cols, rows }) => {
-        const s = sessions[id];
-        if (s && s.ws && s.ws.readyState === WebSocket.OPEN) {
-          s.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-        }
-      });
+      term.onResize(() => resizePtyColsIfChanged(sessions[id]));
       switchTab(id);
     }
 
@@ -3094,6 +3478,7 @@
       const token = getToken();
       const ws = new WebSocket(`${getWsUrl()}?id=${id}&token=${token}`);
       s.ws = ws;
+      s._ptyGeomSig = null;
       s._kicked = false;
 
       ws.onopen = () => {
@@ -3102,12 +3487,8 @@
         hideReconnectOverlay(id);
         // On reconnect: clear terminal so buffered replay doesn't double up
         s.terminal.clear();
-        // Re-fit and send correct dimensions
-        safeFit(s);
-        const dims = s.fitAddon.proposeDimensions();
-        if (dims) {
-          ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
-        }
+        // Re-fit and sync PTY (fitAndKeepScroll → resize via rAF; deduped resizePtyColsIfChanged)
+        fitAndKeepScroll(s);
         // Mark as reconnecting — next data batch is the buffer replay
         s._reconnecting = true;
       };
@@ -3117,7 +3498,6 @@
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
             scrollAwareWrite(s, msg.data);
-            scanOutputForLinks(msg.data);
             // After reconnect buffer replay — avoid heavy reflowTerminal (see afterReconnectReplay)
             if (s._reconnecting) {
               s._reconnecting = false;
@@ -3311,7 +3691,17 @@
       if (_vvLastH !== h) {
         _vvLastH = h;
         if (activeId && sessions[activeId]) {
-          fitAndKeepScroll(sessions[activeId]);
+          const sess = sessions[activeId];
+          fitAndKeepScroll(sess);
+          // iOS keyboard: first frame can still lie about container width cols; settle then refit.
+          if (navigator.maxTouchPoints > 0) {
+            if (sess._vvFitFollowTmo) clearTimeout(sess._vvFitFollowTmo);
+            sess._vvFitFollowTmo = setTimeout(() => {
+              sess._vvFitFollowTmo = null;
+              if (sessions[activeId] !== sess) return;
+              fitAndKeepScroll(sess);
+            }, 130);
+          }
         }
       }
     }

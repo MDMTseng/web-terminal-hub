@@ -5,6 +5,7 @@ const pty = require('node-pty');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
+const { spawnSync } = require('child_process');
 
 
 // ========== Logging System ==========
@@ -188,8 +189,9 @@ function authMiddleware(req, res, next) {
   if (req.path === '/api/login' || req.path === '/api/groups' || req.path.startsWith('/api/groups/')) {
     return next();
   }
-  // Allow static assets (css, fonts)
-  if (req.path === '/style.css') {
+  // Allow static assets (css, fonts) and PWA assets
+  if (req.path === '/style.css' || req.path === '/manifest.json' ||
+      req.path === '/sw.js' || req.path === '/icon.svg') {
     return next();
   }
 
@@ -223,7 +225,7 @@ app.use(express.json({ limit: '5mb' }));
 
 // ========== Request Logging Middleware ==========
 // Noisy polling endpoints — only log on error (4xx/5xx)
-const QUIET_ROUTES = new Set(['/api/groups', '/api/terminals', '/api/platform', '/api/group-info']);
+const QUIET_ROUTES = new Set(['/api/groups', '/api/terminals', '/api/platform', '/api/group-info', '/api/tmux/sessions', '/api/terminal/tmux-sessions']);
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -251,10 +253,12 @@ app.use((req, res, next) => {
 
 // ========== Master Auth Middleware ==========
 function masterAuthMiddleware(req, res, next) {
-  // Always allow: login page, master auth APIs, static assets
+  // Always allow: login page, master auth APIs, static assets, PWA assets
   if (req.path === '/login' || req.path === '/login.html' ||
       req.path === '/api/master-status' || req.path === '/api/master-login' ||
-      req.path === '/api/master-setup' || req.path === '/style.css') {
+      req.path === '/api/master-setup' || req.path === '/style.css' ||
+      req.path === '/manifest.json' || req.path === '/sw.js' ||
+      req.path === '/icon.svg') {
     return next();
   }
 
@@ -615,6 +619,68 @@ function getWindowsBashPath() {
   return null;
 }
 
+/** Bash used to run tmux (Git Bash on Windows, /bin/bash elsewhere). */
+function getBashPathForTmux() {
+  if (process.platform === 'win32') return getWindowsBashPath();
+  return '/bin/bash';
+}
+
+function shellSingleQuoteForBash(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
+/** Tmux session names: conservative charset to avoid shell injection. */
+function validateTmuxSessionName(raw) {
+  const name = String(raw || '').trim();
+  if (name.length < 1 || name.length > 200) return null;
+  if (!/^[\w.+:\-@]+$/.test(name)) return null;
+  return name;
+}
+
+/**
+ * List tmux sessions (name + attached). Requires tmux in PATH inside that bash environment.
+ */
+function listTmuxSessionsFromHost() {
+  const bash = getBashPathForTmux();
+  if (!bash) {
+    return { ok: true, tmuxInstalled: false, sessions: [], hint: 'Git Bash not found — tmux attach needs Bash on Windows.' };
+  }
+  const script = 'command -v tmux >/dev/null 2>&1 || { echo __NO_TMUX__; exit 0; }; tmux list-sessions -F \'#{session_name},#{session_attached}\' 2>/dev/null || true';
+  const r = spawnSync(bash, ['-lc', script], {
+    encoding: 'utf8',
+    timeout: 8000,
+    maxBuffer: 256 * 1024
+  });
+  const out = ((r.stdout || '') + '').trim();
+  const lines = out ? out.split('\n').filter(Boolean) : [];
+  if (lines[0] === '__NO_TMUX__') {
+    return { ok: true, tmuxInstalled: false, sessions: [], hint: 'tmux is not installed or not in PATH.' };
+  }
+  const sessions = [];
+  for (const line of lines) {
+    const comma = line.lastIndexOf(',');
+    if (comma <= 0) continue;
+    const name = line.slice(0, comma);
+    const att = line.slice(comma + 1);
+    if (!name) continue;
+    sessions.push({
+      name,
+      attached: att === '1'
+    });
+  }
+  return { ok: true, tmuxInstalled: true, sessions, hint: sessions.length ? null : 'No tmux server (no sessions in background).' };
+}
+
+function handleListTmuxSessionsApi(req, res) {
+  try {
+    const result = listTmuxSessionsFromHost();
+    res.json(result);
+  } catch (err) {
+    log.error('tmux', `list-sessions failed: ${err.message}`);
+    res.status(500).json({ ok: false, sessions: [], hint: err.message });
+  }
+}
+
 // GET /api/platform — return server OS platform and available shells
 app.get('/api/platform', (req, res) => {
   const plat = process.platform; // 'win32', 'darwin', 'linux', etc.
@@ -643,6 +709,8 @@ app.get('/api/platform', (req, res) => {
   }
   res.json({ platform: plat, shells, defaultShell });
 });
+
+app.get(['/api/tmux/sessions', '/api/terminal/tmux-sessions'], handleListTmuxSessionsApi);
 
 // GET /api/fs/drives — list available drive letters (Windows only)
 app.get('/api/fs/drives', async (req, res) => {
@@ -1242,6 +1310,11 @@ setInterval(() => {
 }, 60 * 60 * 1000); // every hour
 
 // Serve static files (after auth)
+// Serve manifest with correct MIME type for PWA installability
+app.get('/manifest.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/manifest+json');
+  res.sendFile(path.join(__dirname, 'public', 'manifest.json'));
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ========== Terminal state (persistent, per-group) ==========
@@ -1284,6 +1357,15 @@ app.post('/api/terminal/new', async (req, res) => {
   const rows = parseInt(req.body.rows) || 40;
   const group = req.group;
   const requestedCwd = req.body.cwd || '';
+
+  let tmuxAttachName = null;
+  const rawTmuxSession = req.body.tmuxSession;
+  if (rawTmuxSession != null && String(rawTmuxSession).trim()) {
+    tmuxAttachName = validateTmuxSessionName(rawTmuxSession);
+    if (!tmuxAttachName) {
+      return res.status(400).json({ error: 'Invalid tmux session name.' });
+    }
+  }
 
   // Check max terminals for group
   const groupConfig = groupsConfig.find(g => g.name === group);
@@ -1342,11 +1424,26 @@ app.post('/api/terminal/new', async (req, res) => {
     }
   }
 
-  log.info('pty', `Creating terminal ${id} for group "${group}": ${shellCmd} (${cols}x${rows}) cwd=${cwd}`);
+  let shellArgs = [];
+  if (tmuxAttachName) {
+    const bashPath = getBashPathForTmux();
+    if (!bashPath) {
+      return res.status(400).json({
+        error: 'Bash not available on this hub — attaching tmux needs Git Bash (Windows) or /bin/bash (Unix).'
+      });
+    }
+    shellCmd = bashPath;
+    shellLabel = 'bash';
+    const launchCmd = `exec tmux attach -t ${shellSingleQuoteForBash(tmuxAttachName)} || exec "$SHELL" -l`;
+    shellArgs = ['-lic', launchCmd];
+  }
+
+  log.info('pty', `Creating terminal ${id} for group "${group}": ${shellCmd} (${cols}x${rows}) cwd=${cwd}`
+    + `${tmuxAttachName ? ` attachTmux=${tmuxAttachName}` : ''}`);
 
   try {
     const MAX_BUFFER = 100000;
-    const ptyProc = pty.spawn(shellCmd, [], {
+    const ptyProc = pty.spawn(shellCmd, shellArgs, {
       name: 'xterm-256color',
       cols, rows,
       cwd,

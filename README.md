@@ -11,7 +11,7 @@ Access full shell sessions (Bash, PowerShell, CMD) from any browser — desktop 
 ### Terminal
 - **Multi-tab sessions** with independent shell instances per workspace
 - **Shell support**: Bash, PowerShell, cmd.exe
-- **GPU-accelerated rendering** via xterm.js (WebGL > Canvas > DOM fallback)
+- **GPU-accelerated rendering** via xterm.js (WebGL2 on desktop, DOM on iOS / when WebGL unavailable)
 - **Touch scroll with inertia** for smooth mobile scrolling
 - **Pinch-to-zoom** font size adjustment
 - **Output buffering** (100KB per terminal) for seamless reconnection
@@ -231,7 +231,7 @@ web-terminal-hub/
 | **Server** | Express 4.x |
 | **Terminal** | node-pty (pseudo-terminal) |
 | **WebSocket** | ws |
-| **Frontend** | Vanilla JS + xterm.js 5.3 |
+| **Frontend** | Vanilla JS + [@xterm/xterm 6](https://www.npmjs.com/package/@xterm/xterm) |
 | **Rendering** | WebGL / Canvas / DOM (auto-fallback) |
 | **Auth** | crypto.scrypt + SHA-256 (no external deps) |
 | **Styling** | Custom CSS dark theme (no framework) |
