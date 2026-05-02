@@ -98,6 +98,21 @@
             <input type="range" id="termhub-scrollback-range" min="10" max="1000" step="10" />
             <span class="vk-shell-scrollback-value" id="termhub-scrollback-value">300</span>
           </div>
+          <div class="vk-shell-scrollback" title="PTY width slack for TUIs (e.g. Cursor CLI): fewer cols than the grid; 0 = same as grid. Saves automatically.">
+            <span class="vk-shell-scrollback-label">PTY−</span>
+            <input type="range" id="termhub-pty-margin-range" min="0" max="48" step="1" />
+            <span class="vk-shell-scrollback-value" id="termhub-pty-margin-value">0</span>
+          </div>
+          <div class="vk-shell-scrollback" title="Render throttle: when PTY output exceeds X KB/s, batch writes to 2 fps (500ms). Higher = throttle later; max = off.">
+            <span class="vk-shell-scrollback-label">Thr</span>
+            <input type="range" id="termhub-throttle-range" min="50" max="2000" step="50" />
+            <span class="vk-shell-scrollback-value" id="termhub-throttle-value">300</span>
+          </div>
+          <div class="vk-shell-scrollback" title="Mobile only: terminal width is locked per orientation (avoids SIGWINCH storms from address-bar / keyboard jitter). Tap to re-measure for the current orientation.">
+            <span class="vk-shell-scrollback-label">W</span>
+            <span class="vk-shell-scrollback-value" id="termhub-locked-cols-value">auto</span>
+            <button type="button" id="termhub-relock-btn" style="margin-left:8px;padding:2px 8px;font-size:12px;border-radius:4px;border:1px solid #555;background:#222;color:#ddd;">Re-fit</button>
+          </div>
           <!-- User-defined snippets. Tap to send, long-press to edit. -->
           <div class="vk-snippet-strip">
             <div class="vk-snippet-row" id="vk-snippet-row"></div>
@@ -2532,6 +2547,26 @@
       s._fitBackoffTids = [];
     }
 
+    // Guard: proposeDimensions() / safeFit reject — absolute floor for cols
+    const MIN_FIT_COLS = 20;
+
+    /** PTY cols slack vs xterm grid (Cursor CLI / TUIs); UI: Shell ▾ → PTY−. Max 48, stored in localStorage. */
+    const PTY_COL_MARGIN_KEY = 'termhub_pty_col_margin';
+    const PTY_COL_MARGIN_MAX = 48;
+
+    function readPtyColWrapMarginFromStorage() {
+      const raw = parseInt(localStorage.getItem(PTY_COL_MARGIN_KEY), 10);
+      if (Number.isFinite(raw) && raw >= 0 && raw <= PTY_COL_MARGIN_MAX) return raw;
+      return 0;
+    }
+
+    let ptyColWrapMargin = readPtyColWrapMarginFromStorage();
+
+    function ptyColsForGrid(gridCols) {
+      if (!Number.isFinite(gridCols)) return MIN_FIT_COLS;
+      return Math.max(MIN_FIT_COLS, Math.trunc(gridCols) - ptyColWrapMargin);
+    }
+
     /** When safeFit rejects a transient narrow layout (iOS keyboard), retry so PTY cols match grid. */
     function scheduleFitBackoffRetries(s) {
       if (!s?.terminal || !navigator.maxTouchPoints) return;
@@ -2547,19 +2582,201 @@
       }
     }
 
-    /** Push current term.cols × rows to PTY (deduped — onResize + post-fit paths both call this). */
+    /** Push PTY winsize (grid cols minus ptyColWrapMargin) + rows (deduped). */
     function resizePtyColsIfChanged(s) {
       if (!s?.terminal || !s.ws || s.ws.readyState !== WebSocket.OPEN) return;
       try {
-        const cols = s.terminal.cols;
+        const gridCols = s.terminal.cols;
         const rows = s.terminal.rows;
-        if (!Number.isFinite(cols) || !Number.isFinite(rows)) return;
+        if (!Number.isFinite(gridCols) || !Number.isFinite(rows)) return;
+        const cols = ptyColsForGrid(gridCols);
         const sig = `${cols}:${rows}`;
         if (s._ptyGeomSig === sig) return;
         s._ptyGeomSig = sig;
         s.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
       } catch (_) {}
     }
+
+    function setPtyColWrapMargin(next) {
+      const n = Math.max(0, Math.min(PTY_COL_MARGIN_MAX, parseInt(next, 10) || 0));
+      ptyColWrapMargin = n;
+      try {
+        localStorage.setItem(PTY_COL_MARGIN_KEY, String(n));
+      } catch (_) {}
+      for (const s of Object.values(sessions)) {
+        if (!s?.terminal || !s.ws || s.ws.readyState !== WebSocket.OPEN) continue;
+        s._ptyGeomSig = null;
+        resizePtyColsIfChanged(s);
+      }
+    }
+
+    (function initPtyMarginUI() {
+      const range = document.getElementById('termhub-pty-margin-range');
+      const valEl = document.getElementById('termhub-pty-margin-value');
+      if (!range || !valEl) return;
+      range.value = String(ptyColWrapMargin);
+      valEl.textContent = String(ptyColWrapMargin);
+      range.addEventListener('input', () => { valEl.textContent = range.value; });
+      range.addEventListener('change', () => {
+        setPtyColWrapMargin(parseInt(range.value, 10));
+      });
+    })();
+
+    /** Render-throttle: when PTY data rate exceeds threshold, coalesce writes to 2 fps. */
+    const RENDER_THROTTLE_KEY = 'termhub_render_throttle_kbps';
+    const RENDER_THROTTLE_MAX = 2000;          // slider max — treated as "off"
+    const RENDER_THROTTLE_FLUSH_MS = 500;      // 2 fps during burst
+
+    function readRenderThrottleKbps() {
+      const raw = parseInt(localStorage.getItem(RENDER_THROTTLE_KEY), 10);
+      if (Number.isFinite(raw) && raw >= 50 && raw <= RENDER_THROTTLE_MAX) return raw;
+      return 300;
+    }
+    let renderThrottleKbps = readRenderThrottleKbps();
+
+    function setRenderThrottleKbps(next) {
+      const n = Math.max(50, Math.min(RENDER_THROTTLE_MAX, parseInt(next, 10) || 300));
+      renderThrottleKbps = n;
+      try { localStorage.setItem(RENDER_THROTTLE_KEY, String(n)); } catch (_) {}
+      // Immediate flush so a relaxed threshold takes effect right away.
+      for (const s of Object.values(sessions)) flushPendingWrite(s);
+    }
+
+    function flushPendingWrite(s) {
+      if (!s) return;
+      if (s._wrFlushTid) { clearTimeout(s._wrFlushTid); s._wrFlushTid = null; }
+      if (!s._wrBuf) return;
+      const buf = s._wrBuf; s._wrBuf = '';
+      s._wrLastFlush = performance.now();
+      try { scrollAwareWrite(s, buf); } catch (_) {}
+    }
+
+    function throttledWrite(s, data) {
+      if (!s || !s.terminal) return;
+      // "off" — bypass entirely
+      if (renderThrottleKbps >= RENDER_THROTTLE_MAX) {
+        scrollAwareWrite(s, data);
+        return;
+      }
+      const now = performance.now();
+      if (!s._wrWindowStart || now - s._wrWindowStart > 1000) {
+        s._wrWindowStart = now;
+        s._wrWindowBytes = 0;
+      }
+      s._wrWindowBytes += data.length;
+      const burst = s._wrWindowBytes > renderThrottleKbps * 1024;
+
+      if (!burst && !s._wrBuf) {
+        s._wrLastFlush = now;
+        scrollAwareWrite(s, data);
+        return;
+      }
+      s._wrBuf = (s._wrBuf || '') + data;
+      if (s._wrFlushTid) return;
+      const wait = Math.max(0, RENDER_THROTTLE_FLUSH_MS - (now - (s._wrLastFlush || 0)));
+      s._wrFlushTid = setTimeout(() => flushPendingWrite(s), wait);
+    }
+
+    (function initRenderThrottleUI() {
+      const range = document.getElementById('termhub-throttle-range');
+      const valEl = document.getElementById('termhub-throttle-value');
+      if (!range || !valEl) return;
+      const render = (n) => (n >= RENDER_THROTTLE_MAX ? 'off' : String(n));
+      range.value = String(renderThrottleKbps);
+      valEl.textContent = render(renderThrottleKbps);
+      range.addEventListener('input', () => { valEl.textContent = render(parseInt(range.value, 10) || 0); });
+      range.addEventListener('change', () => { setRenderThrottleKbps(parseInt(range.value, 10)); });
+    })();
+
+    /**
+     * Mobile only: lock terminal cols per orientation. Captured on the first successful safeFit
+     * after a re-measure (or first launch) and re-applied on every subsequent fit so address-bar /
+     * keyboard jitter cannot SIGWINCH the PTY repeatedly. Rows still float (cheaper reflow).
+     */
+    const MOBILE_LOCK_COLS_P = 'termhub_mobile_lock_cols_portrait';
+    const MOBILE_LOCK_COLS_L = 'termhub_mobile_lock_cols_landscape';
+    const MOBILE_LOCK_ROWS_P = 'termhub_mobile_lock_rows_portrait';
+    const MOBILE_LOCK_ROWS_L = 'termhub_mobile_lock_rows_landscape';
+    const MIN_FIT_ROWS = 4;
+    // Touch laptops (Surface etc.) report maxTouchPoints>0 but have a mouse — exclude them via
+    // (hover:none) + (pointer:coarse), which only matches phones/tablets without a fine pointer.
+    const isMobileTouch = () => {
+      try {
+        return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+      } catch (_) {
+        return navigator.maxTouchPoints > 0;
+      }
+    };
+    function currentOrientationKey() {
+      return window.innerHeight >= window.innerWidth ? 'portrait' : 'landscape';
+    }
+    function mobileColsKey() {
+      return currentOrientationKey() === 'portrait' ? MOBILE_LOCK_COLS_P : MOBILE_LOCK_COLS_L;
+    }
+    function mobileRowsKey() {
+      return currentOrientationKey() === 'portrait' ? MOBILE_LOCK_ROWS_P : MOBILE_LOCK_ROWS_L;
+    }
+    function getMobileLockedCols() {
+      if (!isMobileTouch()) return null;
+      const raw = parseInt(localStorage.getItem(mobileColsKey()), 10);
+      return Number.isFinite(raw) && raw >= MIN_FIT_COLS ? raw : null;
+    }
+    function getMobileLockedRows() {
+      if (!isMobileTouch()) return null;
+      const raw = parseInt(localStorage.getItem(mobileRowsKey()), 10);
+      return Number.isFinite(raw) && raw >= MIN_FIT_ROWS ? raw : null;
+    }
+    function setMobileLockedGrid(cols, rows) {
+      if (!isMobileTouch()) return;
+      if (!Number.isFinite(cols) || cols < MIN_FIT_COLS) return;
+      if (!Number.isFinite(rows) || rows < MIN_FIT_ROWS) return;
+      try {
+        localStorage.setItem(mobileColsKey(), String(cols));
+        localStorage.setItem(mobileRowsKey(), String(rows));
+      } catch (_) {}
+      refreshMobileLockUI();
+    }
+    function clearMobileLockedGrid() {
+      try {
+        localStorage.removeItem(mobileColsKey());
+        localStorage.removeItem(mobileRowsKey());
+      } catch (_) {}
+      refreshMobileLockUI();
+    }
+    /** Soft keyboard probably up — used to gate capture (rows would be wrong with keyboard up). */
+    function isSoftKeyboardLikelyUp() {
+      const vv = window.visualViewport;
+      if (!vv) return false;
+      return (window.innerHeight - vv.height - (vv.offsetTop || 0)) > 80;
+    }
+    function refreshMobileLockUI() {
+      const valEl = document.getElementById('termhub-locked-cols-value');
+      if (!valEl) return;
+      if (!isMobileTouch()) { valEl.textContent = 'desktop'; return; }
+      const c = getMobileLockedCols(), r = getMobileLockedRows();
+      const o = currentOrientationKey()[0];
+      valEl.textContent = (c && r) ? `${c}×${r} (${o})` : `auto (${o})`;
+    }
+
+    (function initMobileLockUI() {
+      refreshMobileLockUI();
+      const btn = document.getElementById('termhub-relock-btn');
+      if (btn) {
+        btn.addEventListener('click', () => {
+          clearMobileLockedGrid();
+          // Reset translate so the next fit measures the full container
+          try {
+            const app = document.getElementById('app');
+            if (app) app.style.transform = '';
+          } catch (_) {}
+          for (const sess of Object.values(sessions)) {
+            try { fitAndKeepScroll(sess); } catch (_) {}
+          }
+        });
+      }
+      window.addEventListener('orientationchange', () => setTimeout(refreshMobileLockUI, 300));
+      window.addEventListener('resize', refreshMobileLockUI);
+    })();
 
     /** Observe mounted terminal containers — catches iOS keyboard / layout jitter better than window.resize alone. */
     function attachTerminalResizeObserver(s) {
@@ -2599,8 +2816,6 @@
     // reflows the entire scrollback to very few columns — irreversible damage.
     // Guard: check proposeDimensions() BEFORE applying, reject if cols would
     // drop below an absolute minimum OR below half the last known good width.
-    const MIN_FIT_COLS = 20;
-
     function safeFit(s) {
       if (!s || !s.terminal || !s.fitAddon) return false;
       try {
@@ -2610,6 +2825,28 @@
         // (transient layout glitch during iOS app-switch / keyboard animation)
         const curCols = s.terminal.cols;
         if (curCols >= MIN_FIT_COLS && dims.cols < curCols * 0.5) return false;
+        // Mobile: pin cols × rows to per-orientation lock — bypass FitAddon entirely so keyboard
+        // toggle / address-bar jitter cannot SIGWINCH the PTY. App is translated up to keep the
+        // active rows above the soft keyboard (see handleViewportChange).
+        if (isMobileTouch()) {
+          const lc = getMobileLockedCols();
+          const lr = getMobileLockedRows();
+          if (lc && lr) {
+            if (s.terminal.cols !== lc || s.terminal.rows !== lr) {
+              try { s.terminal.resize(lc, lr); } catch (_) {}
+            }
+            return true;
+          }
+          // Capture path — only lock when keyboard is down so rows reflect the real available area.
+          if (!isSoftKeyboardLikelyUp()) {
+            s.fitAddon.fit();
+            if (s.terminal.cols >= MIN_FIT_COLS && s.terminal.rows >= MIN_FIT_ROWS) {
+              setMobileLockedGrid(s.terminal.cols, s.terminal.rows);
+            }
+            return true;
+          }
+          // Keyboard up but no lock yet — fall through to normal fit, don't capture.
+        }
         s.fitAddon.fit();
         return true;
       } catch (_) {
@@ -2780,9 +3017,10 @@
       return null;
     }
 
-    /** 1-based shell cell under (cx,cy); used for tmux mouse wheel SGR payloads. */
+    /** 1-based shell cell under (cx,cy); used for tmux mouse wheel SGR payloads (clamp X to PTY cols). */
     function clientPointToTerminalCell(term, container, cx, cy) {
-      const nCols = term.cols || 80;
+      const dispCols = term.cols || 80;
+      const nCols = ptyColsForGrid(dispCols);
       const nRows = term.rows || 24;
       const xtermEl = container.querySelector('.xterm');
       if (!xtermEl) {
@@ -2794,7 +3032,7 @@
       const usableH = Math.max(1, rect.height - 2 * pad);
       const relX = Math.max(0, cx - rect.left - pad);
       const relY = Math.max(0, cy - rect.top - pad);
-      const cellW = usableW / nCols;
+      const cellW = usableW / dispCols;
       const cellH = usableH / nRows;
       let col = Math.floor(relX / cellW) + 1;
       let row = Math.floor(relY / cellH) + 1;
@@ -2982,7 +3220,7 @@
         let rows = term.rows;
         if (!Number.isFinite(cols) || cols < MIN_FIT_COLS) cols = 80;
         if (!Number.isFinite(rows) || rows < 2) rows = 24;
-        return { cols, rows };
+        return { cols: ptyColsForGrid(cols), rows };
       } finally {
         try {
           if (term) term.dispose();
@@ -3086,6 +3324,7 @@
         term.onData((data) => {
           const s = sessions[id];
           if (s && s.ws && s.ws.readyState === WebSocket.OPEN) {
+            flushPendingWrite(s);
             s.ws.send(JSON.stringify({ type: 'input', data }));
           }
         });
@@ -3472,6 +3711,8 @@
       term.onData((data) => {
         const s = sessions[id];
         if (s && s.ws && s.ws.readyState === WebSocket.OPEN) {
+          // Flush any throttled PTY output so local echo of this keystroke is visible immediately.
+          flushPendingWrite(s);
           s.ws.send(JSON.stringify({ type: 'input', data }));
         }
       });
@@ -3512,19 +3753,22 @@
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
-            scrollAwareWrite(s, msg.data);
+            throttledWrite(s, msg.data);
             // After reconnect buffer replay — avoid heavy reflowTerminal (see afterReconnectReplay)
             if (s._reconnecting) {
               s._reconnecting = false;
               setTimeout(() => {
                 try {
+                  flushPendingWrite(s);
                   afterReconnectReplay(s);
                 } catch (_) {}
               }, 150);
             }
           } else if (msg.type === 'exit') {
+            flushPendingWrite(s);
             scrollAwareWrite(s, `\r\n\x1b[31m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
           } else if (msg.type === 'error') {
+            flushPendingWrite(s);
             scrollAwareWrite(s, `\r\n\x1b[31m[Error: ${msg.message}]\x1b[0m\r\n`);
           } else if (msg.type === 'kicked') {
             s._kicked = true;
@@ -3698,6 +3942,17 @@
       const visibleH = Math.round(vv.height);
       const kbHeight = fullH - visibleH - Math.round(vv.offsetTop);
 
+      // Locked-grid mode (mobile, dims already captured): keep #app at full size, translate up so
+      // the bottom of the grid sits just above the soft keyboard. PTY dims never change → no SIGWINCH.
+      if (isMobileTouch() && getMobileLockedCols() && getMobileLockedRows()) {
+        app.style.top = '0px';
+        app.style.height = fullH + 'px';
+        app.style.transform = kbHeight > 80 ? `translateY(${-kbHeight}px)` : '';
+        return;
+      }
+
+      // Pre-lock / desktop path: shrink container to visible area and refit (rows-only typically).
+      app.style.transform = '';
       const h = kbHeight > 80 ? visibleH : fullH;
       app.style.top = vv.offsetTop + 'px';
       app.style.height = h + 'px';
