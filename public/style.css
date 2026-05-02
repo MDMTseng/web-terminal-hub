@@ -386,6 +386,22 @@ html, body {
   height: 100%;
 }
 
+/* Hide xterm viewport scrollbar — touch / wheel scrolling still works */
+.xterm-viewport,
+.xterm .xterm-viewport,
+.xterm-screen {
+  scrollbar-width: none !important;        /* Firefox */
+  -ms-overflow-style: none !important;     /* IE / old Edge */
+}
+.xterm-viewport::-webkit-scrollbar,
+.xterm .xterm-viewport::-webkit-scrollbar,
+.xterm-screen::-webkit-scrollbar {
+  display: none !important;                /* WebKit / Blink */
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
 /* Offline / reconnecting: gray out terminal (overlay stays full-color) */
 .terminal-container.terminal-disconnected > .xterm {
   filter: grayscale(0.88) brightness(0.62);

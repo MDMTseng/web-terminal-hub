@@ -2810,6 +2810,38 @@
       } catch (_) {}
     }
 
+    /**
+     * FitAddon's proposeDimensions hard-subtracts ~14px (overviewRuler.width || 14) from the
+     * available width as a scrollbar gutter — even when the scrollbar is hidden via CSS, leaving
+     * a 1–2 cols gap on the right. We replace it with the same math minus the subtraction so cols
+     * uses the full parent width.
+     */
+    function patchFitAddonNoScrollbarGutter(term, fitAddon) {
+      fitAddon.proposeDimensions = function () {
+        try {
+          if (!term?.element?.parentElement) return undefined;
+          const dims = term._core?._renderService?.dimensions;
+          if (!dims || !dims.css.cell.width || !dims.css.cell.height) return undefined;
+          const ps = window.getComputedStyle(term.element.parentElement);
+          const parentH = parseInt(ps.getPropertyValue('height')) || 0;
+          const parentW = Math.max(0, parseInt(ps.getPropertyValue('width')) || 0);
+          const es = window.getComputedStyle(term.element);
+          const padTop = parseInt(es.getPropertyValue('padding-top')) || 0;
+          const padBot = parseInt(es.getPropertyValue('padding-bottom')) || 0;
+          const padL = parseInt(es.getPropertyValue('padding-left')) || 0;
+          const padR = parseInt(es.getPropertyValue('padding-right')) || 0;
+          const availH = parentH - padTop - padBot;
+          const availW = parentW - padL - padR;
+          return {
+            cols: Math.max(2, Math.floor(availW / dims.css.cell.width)),
+            rows: Math.max(1, Math.floor(availH / dims.css.cell.height))
+          };
+        } catch (_) {
+          return undefined;
+        }
+      };
+    }
+
     // ---- Safe fit: prevent destructive narrow reflows ----
     // On mobile (especially iOS PWA), app-switch / keyboard animations can
     // transiently shrink the container. If fit() runs at that moment, xterm
@@ -3221,6 +3253,7 @@
         });
         const fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
+        patchFitAddonNoScrollbarGutter(term, fitAddon);
         term.open(padBox);
         loadBestRenderer(term);
         fitAddon.fit();
@@ -3308,6 +3341,7 @@
 
         const fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
+        patchFitAddonNoScrollbarGutter(term, fitAddon);
 
         term.open(container);
         try {
@@ -3695,6 +3729,7 @@
 
       const fitAddon = new FitAddon.FitAddon();
       term.loadAddon(fitAddon);
+      patchFitAddonNoScrollbarGutter(term, fitAddon);
 
       term.open(container);
       try {
