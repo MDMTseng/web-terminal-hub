@@ -2825,27 +2825,35 @@
         // (transient layout glitch during iOS app-switch / keyboard animation)
         const curCols = s.terminal.cols;
         if (curCols >= MIN_FIT_COLS && dims.cols < curCols * 0.5) return false;
-        // Mobile: pin cols × rows to per-orientation lock — bypass FitAddon entirely so keyboard
-        // toggle / address-bar jitter cannot SIGWINCH the PTY. App is translated up to keep the
-        // active rows above the soft keyboard (see handleViewportChange).
+        // Mobile: pin cols × rows to per-orientation lock so keyboard/address-bar jitter can't
+        // SIGWINCH the PTY. Lock is self-healing: when keyboard is down, we grow the lock to match
+        // a larger proposed size (e.g. drawer was open at first capture, now closed). Lock never
+        // shrinks — Re-fit clears it manually. App is translated up to hide the keyboard area
+        // (see handleViewportChange).
         if (isMobileTouch()) {
           const lc = getMobileLockedCols();
           const lr = getMobileLockedRows();
+          // Self-healing capture: when keyboard is down, if the container can now host more cols/rows
+          // than the existing lock (e.g. drawer was open at first capture, now closed), grow the lock.
+          // Lock only ever increases — small transients (keyboard / drawer open) won't shrink it.
+          if (!isSoftKeyboardLikelyUp() && dims.cols >= MIN_FIT_COLS && dims.rows >= MIN_FIT_ROWS) {
+            const newCols = lc ? Math.max(lc, dims.cols) : dims.cols;
+            const newRows = lr ? Math.max(lr, dims.rows) : dims.rows;
+            if (newCols !== lc || newRows !== lr) {
+              setMobileLockedGrid(newCols, newRows);
+            }
+            if (s.terminal.cols !== newCols || s.terminal.rows !== newRows) {
+              try { s.terminal.resize(newCols, newRows); } catch (_) {}
+            }
+            return true;
+          }
+          // Keyboard up — apply existing lock if any; otherwise fall through to a plain fit (no capture).
           if (lc && lr) {
             if (s.terminal.cols !== lc || s.terminal.rows !== lr) {
               try { s.terminal.resize(lc, lr); } catch (_) {}
             }
             return true;
           }
-          // Capture path — only lock when keyboard is down so rows reflect the real available area.
-          if (!isSoftKeyboardLikelyUp()) {
-            s.fitAddon.fit();
-            if (s.terminal.cols >= MIN_FIT_COLS && s.terminal.rows >= MIN_FIT_ROWS) {
-              setMobileLockedGrid(s.terminal.cols, s.terminal.rows);
-            }
-            return true;
-          }
-          // Keyboard up but no lock yet — fall through to normal fit, don't capture.
         }
         s.fitAddon.fit();
         return true;
