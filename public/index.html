@@ -2594,6 +2594,7 @@
         if (s._ptyGeomSig === sig) return;
         s._ptyGeomSig = sig;
         s.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        console.log('[pty resize]', { gridCols, ptyCols: cols, rows, margin: ptyColWrapMargin });
       } catch (_) {}
     }
 
@@ -2616,8 +2617,8 @@
       if (!range || !valEl) return;
       range.value = String(ptyColWrapMargin);
       valEl.textContent = String(ptyColWrapMargin);
-      range.addEventListener('input', () => { valEl.textContent = range.value; });
-      range.addEventListener('change', () => {
+      range.addEventListener('input', () => {
+        valEl.textContent = range.value;
         setPtyColWrapMargin(parseInt(range.value, 10));
       });
     })();
