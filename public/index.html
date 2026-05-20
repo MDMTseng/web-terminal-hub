@@ -93,10 +93,10 @@
 
         <!-- ===== Shell keys + snippets ===== -->
         <div id="vk-shell-keys" class="hidden">
-          <div class="vk-shell-scrollback" title="Max scrollback lines (lower = faster after app switch)">
+          <div class="vk-shell-scrollback" title="Max scrollback lines (lower = faster after app switch / lighter memory; higher = scroll back further in Claude Code, shells, etc.)">
             <span class="vk-shell-scrollback-label">Buf</span>
-            <input type="range" id="termhub-scrollback-range" min="10" max="1000" step="10" />
-            <span class="vk-shell-scrollback-value" id="termhub-scrollback-value">300</span>
+            <input type="range" id="termhub-scrollback-range" min="100" max="20000" step="100" />
+            <span class="vk-shell-scrollback-value" id="termhub-scrollback-value">5000</span>
           </div>
           <div class="vk-shell-scrollback" title="PTY width slack for TUIs (e.g. Cursor CLI): fewer cols than the grid; 0 = same as grid. Saves automatically.">
             <span class="vk-shell-scrollback-label">PTY−</span>
@@ -2344,9 +2344,9 @@
     })();
 
     const SCROLLBACK_STORAGE_KEY = 'termhub_scrollback_lines';
-    const SCROLLBACK_MIN = 10;
-    const SCROLLBACK_MAX = 1000;
-    const SCROLLBACK_DEFAULT = 300;
+    const SCROLLBACK_MIN = 100;
+    const SCROLLBACK_MAX = 20000;
+    const SCROLLBACK_DEFAULT = 5000;
 
     function getScrollbackLines() {
       const raw = parseInt(localStorage.getItem(SCROLLBACK_STORAGE_KEY), 10);
