@@ -1443,11 +1443,15 @@ app.post('/api/terminal/new', async (req, res) => {
 
   try {
     const MAX_BUFFER = 100000;
+    // Force non-CJK locale so apps that compute char widths via wcwidth / unicode-width
+    // tables (Cursor CLI, ratatui, blessed, etc.) treat East-Asian Ambiguous chars
+    // (e.g., box-drawing │ ─ ┌ ┐) as 1 col — matching xterm.js's default rendering.
+    // CJK locale would make them 2 cols, causing app layout to drift vs xterm grid.
     const ptyProc = pty.spawn(shellCmd, shellArgs, {
       name: 'xterm-256color',
       cols, rows,
       cwd,
-      env: process.env
+      env: { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' }
     });
 
     const termInfo = {

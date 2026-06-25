@@ -2858,32 +2858,25 @@
         // (transient layout glitch during iOS app-switch / keyboard animation)
         const curCols = s.terminal.cols;
         if (curCols >= MIN_FIT_COLS && dims.cols < curCols * 0.5) return false;
-        // Mobile: pin cols × rows to per-orientation lock so keyboard/address-bar jitter can't
-        // SIGWINCH the PTY. Lock is self-healing: when keyboard is down, we grow the lock to match
-        // a larger proposed size (e.g. drawer was open at first capture, now closed). Lock never
-        // shrinks — Re-fit clears it manually. App is translated up to hide the keyboard area
-        // (see handleViewportChange).
+        // Mobile: lock COLS only (per-orientation, self-healing grow) so keyboard / address-bar
+        // jitter can't reflow text. ROWS always follows the current proposed value so the cursor
+        // is never clipped when the drawer expands the keyboard panel. Soft keyboard never
+        // changes container height (handleViewportChange translates the app), so this rows-follow
+        // policy doesn't cause keyboard-driven SIGWINCH spam.
         if (isMobileTouch()) {
           const lc = getMobileLockedCols();
-          const lr = getMobileLockedRows();
-          // Self-healing capture: when keyboard is down, if the container can now host more cols/rows
-          // than the existing lock (e.g. drawer was open at first capture, now closed), grow the lock.
-          // Lock only ever increases — small transients (keyboard / drawer open) won't shrink it.
-          if (!isSoftKeyboardLikelyUp() && dims.cols >= MIN_FIT_COLS && dims.rows >= MIN_FIT_ROWS) {
-            const newCols = lc ? Math.max(lc, dims.cols) : dims.cols;
-            const newRows = lr ? Math.max(lr, dims.rows) : dims.rows;
-            if (newCols !== lc || newRows !== lr) {
-              setMobileLockedGrid(newCols, newRows);
-            }
-            if (s.terminal.cols !== newCols || s.terminal.rows !== newRows) {
-              try { s.terminal.resize(newCols, newRows); } catch (_) {}
-            }
-            return true;
+          // Grow cols lock when keyboard is down and the container can host more (drawer closed,
+          // window grew, etc.). Lock never shrinks — Re-fit clears it manually.
+          let useCols = lc;
+          if (!isSoftKeyboardLikelyUp() && dims.cols >= MIN_FIT_COLS) {
+            useCols = lc ? Math.max(lc, dims.cols) : dims.cols;
           }
-          // Keyboard up — apply existing lock if any; otherwise fall through to a plain fit (no capture).
-          if (lc && lr) {
-            if (s.terminal.cols !== lc || s.terminal.rows !== lr) {
-              try { s.terminal.resize(lc, lr); } catch (_) {}
+          // Rows: always use proposed (clamped) so cursor stays visible regardless of drawer state.
+          const useRows = Math.max(MIN_FIT_ROWS, dims.rows);
+          if (useCols && useCols >= MIN_FIT_COLS) {
+            if (useCols !== lc) setMobileLockedGrid(useCols, useRows); // mirrors rows into storage for UI
+            if (s.terminal.cols !== useCols || s.terminal.rows !== useRows) {
+              try { s.terminal.resize(useCols, useRows); } catch (_) {}
             }
             return true;
           }
@@ -3988,7 +3981,7 @@
 
       // Locked-grid mode (mobile, dims already captured): keep #app at full size, translate up so
       // the bottom of the grid sits just above the soft keyboard. PTY dims never change → no SIGWINCH.
-      if (isMobileTouch() && getMobileLockedCols() && getMobileLockedRows()) {
+      if (isMobileTouch() && getMobileLockedCols()) {
         app.style.top = '0px';
         app.style.height = fullH + 'px';
         app.style.transform = kbHeight > 80 ? `translateY(${-kbHeight}px)` : '';
