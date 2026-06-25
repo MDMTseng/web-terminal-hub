@@ -1319,6 +1319,98 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ========== Terminal state (persistent, per-group) ==========
 const terminals = new Map(); // id -> { pty, shell, created, clients, getBuffer, shellLabel, group }
+
+// ========== ANSI-aware line buffer ==========
+// Splits incoming pty data into "lines" at \n boundaries that are NOT inside
+// an ANSI escape sequence. Each line keeps its raw bytes (escapes included)
+// so xterm can replay them verbatim. Oldest lines are trimmed when totalBytes
+// exceeds MAX_BYTES. firstLineIndex is the absolute index of lines[0] within
+// the full session history (monotonic, never decreases), giving clients a
+// stable cursor for fetching older chunks.
+function createLineBuffer(maxBytes) {
+  return {
+    lines: [],            // [{ data: string, bytes: number }]
+    pending: '',          // partial line not yet terminated
+    escState: 0,          // 0=normal 1=just saw ESC 2=CSI 3=OSC 4=other-short
+    totalBytes: 0,
+    firstLineIndex: 0,
+    maxBytes,
+    append(chunk) {
+      // Walk chunk, track ANSI state, split on \n when escState === 0.
+      let start = 0;
+      for (let i = 0; i < chunk.length; i++) {
+        const c = chunk.charCodeAt(i);
+        switch (this.escState) {
+          case 0:
+            if (c === 0x1b) { this.escState = 1; }
+            else if (c === 0x0a) {
+              // safe newline: flush pending + current segment as one line
+              const lineData = this.pending + chunk.slice(start, i + 1);
+              this.pending = '';
+              start = i + 1;
+              this.lines.push({ data: lineData, bytes: lineData.length });
+              this.totalBytes += lineData.length;
+            }
+            break;
+          case 1: // just saw ESC
+            if (c === 0x5b) this.escState = 2;          // [ → CSI
+            else if (c === 0x5d) this.escState = 3;     // ] → OSC
+            else if (c === 0x50 || c === 0x58 || c === 0x5e || c === 0x5f) this.escState = 3; // DCS/SOS/PM/APC -> string term
+            else this.escState = 0;                     // short 2-byte escape; consumed
+            break;
+          case 2: // CSI: parameters then final byte 0x40–0x7e
+            if (c >= 0x40 && c <= 0x7e) this.escState = 0;
+            break;
+          case 3: // OSC/string: ends at BEL (0x07) or ESC \\ (0x1b 0x5c)
+            if (c === 0x07) this.escState = 0;
+            else if (c === 0x1b) this.escState = 5;     // expect \\
+            break;
+          case 5:
+            this.escState = (c === 0x5c) ? 0 : 0;       // either way exit string
+            break;
+        }
+      }
+      // tail: anything after last newline (or whole chunk if no newline) goes to pending
+      if (start < chunk.length) this.pending += chunk.slice(start);
+
+      // trim oldest while over budget
+      while (this.totalBytes > this.maxBytes && this.lines.length > 1) {
+        const dropped = this.lines.shift();
+        this.totalBytes -= dropped.bytes;
+        this.firstLineIndex++;
+      }
+    },
+    // Snapshot of all stored lines (does NOT include pending tail).
+    snapshot() {
+      return {
+        firstLineIndex: this.firstLineIndex,
+        lines: this.lines,
+        pending: this.pending,
+      };
+    },
+    // Return lines [fromAbs, fromAbs+count) clamped to what's available.
+    sliceAbs(fromAbs, count) {
+      const localFrom = Math.max(0, fromAbs - this.firstLineIndex);
+      const localTo = Math.min(this.lines.length, localFrom + count);
+      return this.lines.slice(localFrom, localTo);
+    },
+    // Tail lines totalling up to `targetBytes`, plus pending. Returns {startLine, lines, pending}.
+    tailByBytes(targetBytes) {
+      let acc = this.pending.length;
+      let i = this.lines.length;
+      while (i > 0 && acc < targetBytes) {
+        i--;
+        acc += this.lines[i].bytes;
+      }
+      return {
+        startLine: this.firstLineIndex + i,
+        endLine: this.firstLineIndex + this.lines.length,
+        lines: this.lines.slice(i),
+        pending: this.pending,
+      };
+    },
+  };
+}
 let nextId = 1;
 
 function getTerminalsForGroup(groupName) {
@@ -1442,7 +1534,7 @@ app.post('/api/terminal/new', async (req, res) => {
     + `${tmuxAttachName ? ` attachTmux=${tmuxAttachName}` : ''}`);
 
   try {
-    const MAX_BUFFER = 100000;
+    const MAX_BUFFER_BYTES = 20 * 1024 * 1024; // 20MB per terminal
     // Force non-CJK locale so apps that compute char widths via wcwidth / unicode-width
     // tables (Cursor CLI, ratatui, blessed, etc.) treat East-Asian Ambiguous chars
     // (e.g., box-drawing │ ─ ┌ ┐) as 1 col — matching xterm.js's default rendering.
@@ -1454,22 +1546,19 @@ app.post('/api/terminal/new', async (req, res) => {
       env: { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' }
     });
 
+    const lineBuf = createLineBuffer(MAX_BUFFER_BYTES);
     const termInfo = {
       pty: ptyProc,
       shell: shellCmd,
       shellLabel,
-      _outputBuffer: '',
+      lineBuf,
       created: new Date().toISOString(),
       clients: new Set(),
-      getBuffer() { return this._outputBuffer; },
       group
     };
 
     ptyProc.onData((data) => {
-      termInfo._outputBuffer += data;
-      if (termInfo._outputBuffer.length > MAX_BUFFER) {
-        termInfo._outputBuffer = termInfo._outputBuffer.slice(-MAX_BUFFER);
-      }
+      lineBuf.append(data);
       if (termInfo.clients) {
         const msg = JSON.stringify({ type: 'output', data });
         for (const ws of termInfo.clients) {
@@ -1504,6 +1593,43 @@ app.post('/api/terminal/:id/resize', async (req, res) => {
   const rows = parseInt(req.body.rows) || 40;
   info.pty.resize(cols, rows);
   res.json({ ok: true, cols, rows });
+});
+
+// Fetch older scrollback by absolute line range.
+// Query: ?fromLine=N&maxBytes=B (returns lines starting at fromLine until either
+// end-of-buffer or maxBytes accumulated, whichever comes first).
+app.get('/api/terminal/:id/scrollback', (req, res) => {
+  const id = parseInt(req.params.id);
+  const info = terminals.get(id);
+  if (!info) return res.status(404).json({ error: 'Terminal not found' });
+  if (info.group !== req.group) return res.status(403).json({ error: 'Not your terminal' });
+
+  const buf = info.lineBuf;
+  const maxBytes = Math.min(20 * 1024 * 1024, parseInt(req.query.maxBytes) || 5 * 1024 * 1024);
+  const totalLines = buf.firstLineIndex + buf.lines.length;
+  // toLine = exclusive upper bound (walk backward). Defaults to current end.
+  const toLine = Math.min(totalLines, parseInt(req.query.toLine) || totalLines);
+
+  let endLocal = toLine - buf.firstLineIndex; // exclusive
+  if (endLocal < 0) endLocal = 0;
+  if (endLocal > buf.lines.length) endLocal = buf.lines.length;
+
+  let acc = 0;
+  let startLocal = endLocal;
+  while (startLocal > 0 && acc < maxBytes) {
+    startLocal--;
+    acc += buf.lines[startLocal].bytes;
+  }
+  const out = [];
+  for (let i = startLocal; i < endLocal; i++) out.push(buf.lines[i].data);
+
+  res.json({
+    data: out.join(''),
+    firstLineIndex: buf.firstLineIndex,
+    startLine: buf.firstLineIndex + startLocal,
+    endLine: buf.firstLineIndex + endLocal,
+    bytes: acc,
+  });
 });
 
 app.delete('/api/terminal/:id', async (req, res) => {
@@ -1603,11 +1729,19 @@ wss.on('connection', (ws, req) => {
   log.info('ws', `Client connected to terminal ${id} (group: ${ws._group})`);
   info.clients.add(ws);
 
-  // Send buffered output
-  const buffer = info.getBuffer();
-  if (buffer) {
-    ws.send(JSON.stringify({ type: 'output', data: buffer }));
-  }
+  // Send tail of scrollback (~1MB). Client uses lineRange to fetch older chunks on demand.
+  const INITIAL_TAIL_BYTES = 1 * 1024 * 1024;
+  const tail = info.lineBuf.tailByBytes(INITIAL_TAIL_BYTES);
+  let initialData = '';
+  for (const ln of tail.lines) initialData += ln.data;
+  initialData += tail.pending;
+  ws.send(JSON.stringify({
+    type: 'history',
+    data: initialData,
+    firstLineIndex: info.lineBuf.firstLineIndex,
+    startLine: tail.startLine,
+    endLine: tail.endLine,
+  }));
 
   ws.on('message', (msg) => {
     // Re-validate token on each message

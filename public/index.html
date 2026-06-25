@@ -113,6 +113,10 @@
             <span class="vk-shell-scrollback-value" id="termhub-locked-cols-value">auto</span>
             <button type="button" id="termhub-relock-btn" style="margin-left:8px;padding:2px 8px;font-size:12px;border-radius:4px;border:1px solid #555;background:#222;color:#ddd;">Re-fit</button>
           </div>
+          <div class="vk-shell-scrollback" title="Loaded scrollback size for the active tab. Initial WS sync is ~1MB; scroll up near top to fetch +5MB chunks (up to 20MB).">
+            <span class="vk-shell-scrollback-label">Hist</span>
+            <span class="vk-shell-scrollback-value" id="termhub-history-size">0 KB</span>
+          </div>
           <!-- User-defined snippets. Tap to send, long-press to edit. -->
           <div class="vk-snippet-strip">
             <div class="vk-snippet-row" id="vk-snippet-row"></div>
@@ -2495,6 +2499,15 @@
     function initScrollTracking(s) {
       s._userScrolledUp = false;
       s._suppressScrollTrack = false;
+      s._historyPromptPending = false;
+      s._userGestureSinceReset = false; // require a real touch/wheel/key before prompt can fire
+
+      const armGesture = () => { s._userGestureSinceReset = true; };
+      const opts = { passive: true };
+      s.container.addEventListener('touchstart', armGesture, opts);
+      s.container.addEventListener('wheel', armGesture, opts);
+      s.container.addEventListener('keydown', armGesture, opts);
+      s.container.addEventListener('pointerdown', armGesture, opts);
 
       // When the viewport scrolls, check if user is NOT at bottom
       s.terminal.onScroll(() => {
@@ -2504,7 +2517,72 @@
         if (isAlternateScreenTerminal(s.terminal)) return;
         const buf = s.terminal.buffer.active;
         s._userScrolledUp = buf.viewportY < buf.baseY;
+        // At very top → prompt user to load older scrollback (5MB chunk).
+        // Guarded by _historyPromptPending so we don't re-prompt while still at top.
+        if (buf.viewportY === 0) {
+          if (!s._loadingHistory && !s._historyPromptPending &&
+              s._userGestureSinceReset === true &&
+              typeof s._oldestLoadedLine === 'number' &&
+              s._oldestLoadedLine > (s._firstLineIndex || 0)) {
+            s._historyPromptPending = true;
+            const remaining = s._oldestLoadedLine - s._firstLineIndex;
+            setTimeout(() => {
+              const ok = confirm(`Load older history? (~1MB chunk, ${remaining} more lines available on server)`);
+              if (ok) maybeLoadOlderHistory(s);
+            }, 0);
+          }
+        } else if (buf.viewportY > 5) {
+          s._historyPromptPending = false;
+        }
       });
+    }
+
+    function formatBytes(n) {
+      if (n < 1024) return `${n} B`;
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+      return `${(n / 1024 / 1024).toFixed(2)} MB`;
+    }
+    function updateHistorySizeIndicator() {
+      const el = document.getElementById('termhub-history-size');
+      if (!el) return;
+      const s = activeId && sessions[activeId];
+      if (!s || typeof s._history !== 'string') { el.textContent = '—'; return; }
+      el.textContent = formatBytes(s._history.length);
+    }
+
+    async function maybeLoadOlderHistory(s) {
+      if (!s || s._loadingHistory) return;
+      if (typeof s._oldestLoadedLine !== 'number') return;
+      if (s._oldestLoadedLine <= (s._firstLineIndex || 0)) return; // nothing older available
+      s._loadingHistory = true;
+      try {
+        if (!s.id) return;
+        const url = `/api/terminal/${s.id}/scrollback?toLine=${s._oldestLoadedLine}&maxBytes=${1 * 1024 * 1024}`;
+        const resp = await authFetchJson(url);
+        if (!resp || !resp.data || resp.startLine >= s._oldestLoadedLine) return;
+        // Prepend to client history, update bounds.
+        s._history = resp.data + (s._history || '');
+        s._oldestLoadedLine = resp.startLine;
+        s._firstLineIndex = resp.firstLineIndex;
+        // Re-render: bump xterm scrollback, reset, write full history. Restore "near-top" view.
+        const term = s.terminal;
+        const prevScrollback = term.options.scrollback;
+        const desired = Math.max(prevScrollback || 1, 500000);
+        if (desired !== prevScrollback) term.options.scrollback = desired;
+        s._suppressScrollTrack = true;
+        term.reset();
+        term.write(s._history, () => {
+          // After re-render, keep user near where they were (top of just-loaded chunk).
+          term.scrollToTop();
+          requestAnimationFrame(() => { s._suppressScrollTrack = false; });
+        });
+        if (s.id === activeId) updateHistorySizeIndicator();
+        showToast(`Loaded ${(resp.bytes / 1024 / 1024).toFixed(1)}MB older history`, 'info');
+      } catch (err) {
+        console.error('scrollback load failed', err);
+      } finally {
+        s._loadingHistory = false;
+      }
     }
 
     // Write data to terminal, preserving scroll position when user has scrolled up.
@@ -3551,6 +3629,7 @@
         sessions[id].tab.classList.add('active');
         sessions[id].container.style.display = 'block';
         activeId = id;
+        updateHistorySizeIndicator();
         setTimeout(() => {
           if (sessions[id] && sessions[id].terminal) {
             fitAndKeepScroll(sessions[id]);
@@ -3762,6 +3841,7 @@
     function connectWs(id) {
       const s = sessions[id];
       if (!s || s.type === 'file') return;
+      s.id = id;
 
       // Close old socket if any
       if (s.ws) {
@@ -3791,6 +3871,29 @@
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
             throttledWrite(s, msg.data);
+            // Track live output in client-side history so re-render on backfill stays consistent.
+            if (typeof s._history === 'string') {
+              s._history += msg.data;
+              const CLIENT_HISTORY_CAP = 20 * 1024 * 1024;
+              if (s._history.length > CLIENT_HISTORY_CAP) {
+                const trim = s._history.length - CLIENT_HISTORY_CAP;
+                s._history = s._history.slice(trim);
+                // We can't recompute oldestLoadedLine precisely after byte-trim; mark as "best effort".
+                s._oldestLoadedLine = s._firstLineIndex; // gap may now exist on server side; clamp.
+              }
+              if (s.id === activeId) updateHistorySizeIndicator();
+            }
+          } else if (msg.type === 'history') {
+            s._history = msg.data || '';
+            s._firstLineIndex = msg.firstLineIndex || 0;
+            s._oldestLoadedLine = msg.startLine || 0;
+            s._endLine = msg.endLine || 0;
+            // After any history payload (initial load / reconnect / mobile resume),
+            // require a fresh user gesture before the load-older confirm can fire again.
+            s._userGestureSinceReset = false;
+            s._historyPromptPending = false;
+            throttledWrite(s, msg.data || '');
+            if (s.id === activeId) updateHistorySizeIndicator();
             // After reconnect buffer replay — avoid heavy reflowTerminal (see afterReconnectReplay)
             if (s._reconnecting) {
               s._reconnecting = false;
@@ -3909,9 +4012,21 @@
       }
     }
 
+    // ---- bfcache restore: also disarm load-older confirm ----
+    window.addEventListener('pageshow', (e) => {
+      for (const s of Object.values(sessions)) {
+        if (s && s.terminal) { s._userGestureSinceReset = false; s._historyPromptPending = false; }
+      }
+    });
+
     // ---- Visibility change: reconnect when app comes back to foreground ----
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
+        // Disarm load-older confirm across all sessions — Safari can restore from bfcache
+        // and fire scroll events before any new user gesture.
+        for (const s of Object.values(sessions)) {
+          if (s && s.terminal) { s._userGestureSinceReset = false; s._historyPromptPending = false; }
+        }
         // Small delay to let network recover
         setTimeout(() => {
           let anyDead = false;
