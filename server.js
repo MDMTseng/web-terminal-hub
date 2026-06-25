@@ -1366,12 +1366,29 @@ function createLineBuffer(maxBytes) {
             else if (c === 0x1b) this.escState = 5;     // expect \\
             break;
           case 5:
-            this.escState = (c === 0x5c) ? 0 : 0;       // either way exit string
+            // Inside OSC, just saw ESC. Per spec, ESC \\ terminates the string. Anything else means
+            // the previous ESC starts a fresh sequence (string was malformed). Re-dispatch:
+            if (c === 0x5c) this.escState = 0;          // proper ST → exit string
+            else if (c === 0x5b) this.escState = 2;     // ESC [ → new CSI
+            else if (c === 0x5d || c === 0x50 || c === 0x58 || c === 0x5e || c === 0x5f) this.escState = 3; // new string
+            else this.escState = 0;                     // short 2-byte escape; consumed
             break;
         }
       }
       // tail: anything after last newline (or whole chunk if no newline) goes to pending
       if (start < chunk.length) this.pending += chunk.slice(start);
+
+      // Pending must also be bounded — alt-screen TUIs (vim / claude code fullscreen) can emit
+      // megabytes without a newline by using cursor-positioning sequences. When pending grows past
+      // PENDING_FLUSH_BYTES, flush it as a pseudo-line so totalBytes accounting catches it and the
+      // ringbuffer can trim. Lose the "line" semantic for that chunk — fine, replay is still verbatim.
+      const PENDING_FLUSH_BYTES = 256 * 1024;
+      if (this.pending.length > PENDING_FLUSH_BYTES) {
+        const lineData = this.pending;
+        this.pending = '';
+        this.lines.push({ data: lineData, bytes: lineData.length });
+        this.totalBytes += lineData.length;
+      }
 
       // trim oldest while over budget
       while (this.totalBytes > this.maxBytes && this.lines.length > 1) {

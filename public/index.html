@@ -2564,11 +2564,13 @@
         s._history = resp.data + (s._history || '');
         s._oldestLoadedLine = resp.startLine;
         s._firstLineIndex = resp.firstLineIndex;
-        // Re-render: bump xterm scrollback, reset, write full history. Restore "near-top" view.
+        // Re-render: size xterm scrollback to actual line count so cells don't OOM on mobile
+        // (fixed 500k × 80c × ~8B/cell ≈ 320MB). Estimate from \n count + a small headroom; cap
+        // at 200k as a safety ceiling.
         const term = s.terminal;
-        const prevScrollback = term.options.scrollback;
-        const desired = Math.max(prevScrollback || 1, 500000);
-        if (desired !== prevScrollback) term.options.scrollback = desired;
+        const lineCount = (s._history.match(/\n/g) || []).length;
+        const desired = Math.min(200000, Math.max(term.options.scrollback || 1, lineCount + 1000));
+        if (desired !== term.options.scrollback) term.options.scrollback = desired;
         s._suppressScrollTrack = true;
         term.reset();
         term.write(s._history, () => {
