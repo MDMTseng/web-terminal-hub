@@ -5,25 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#1a1a2e">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon.svg">
   <title>Terminal Hub</title>
   <link rel="stylesheet" href="style.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-webgl@0.16.0/lib/xterm-addon-webgl.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-canvas@0.5.0/lib/xterm-addon-canvas.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/css/xterm.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.11.0/lib/addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.19.0/lib/addon-webgl.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.12.0/lib/addon-web-links.min.js"></script>
 </head>
 <body>
   <!-- Toast notification container -->
   <div id="toast-container"></div>
 
   <div id="app">
-    <!-- Top bar with tabs -->
+    <!-- Top bar: tabs -->
     <div id="topbar">
-      <div id="tabs-container">
-        <div id="tabs"></div>
-        <button id="new-tab-btn" title="New Terminal">+</button>
+      <div id="tabs-view" class="topbar-tabs-view">
+        <div id="tabs-container">
+          <div id="tabs"></div>
+          <button id="new-tab-btn" title="New Terminal">+</button>
+        </div>
       </div>
     </div>
 
@@ -55,11 +60,11 @@
       </div>
       <!-- Expanded rows (hidden by default) -->
       <div id="vk-expanded" class="vk-expanded hidden">
-        <!-- Mode toggle: Shell / Claude / Links -->
+        <!-- Mode toggle: Shell / Claude / Setting -->
         <div class="vk-row vk-mode-toggle">
           <button class="vk-mode-btn" id="vk-mode-shell" onclick="switchVkMode('shell')">Shell</button>
           <button class="vk-mode-btn active" id="vk-mode-claude" onclick="switchVkMode('claude')">Claude</button>
-          <button class="vk-mode-btn" id="vk-mode-links" onclick="switchVkMode('links')">Links <span id="vk-links-badge" class="vk-links-badge hidden">0</span></button>
+          <button class="vk-mode-btn" id="vk-mode-setting" onclick="switchVkMode('setting')">⚙ Setting</button>
         </div>
 
         <!-- ===== Claude Code Keys ===== -->
@@ -87,13 +92,14 @@
           </div>
         </div>
 
-        <!-- ===== Shell Keys ===== -->
+        <!-- ===== Shell keys + snippets ===== -->
         <div id="vk-shell-keys" class="hidden">
-          <div class="vk-shell-scrollback" title="Max scrollback lines (lower = faster after app switch)">
-            <span class="vk-shell-scrollback-label">Buf</span>
-            <input type="range" id="termhub-scrollback-range" min="10" max="1000" step="10" />
-            <span class="vk-shell-scrollback-value" id="termhub-scrollback-value">300</span>
+          <!-- User-defined snippets. Tap to send, long-press to edit. -->
+          <div class="vk-snippet-strip">
+            <div class="vk-snippet-row" id="vk-snippet-row"></div>
+            <button type="button" class="vk-snippet-add" id="vk-snippet-add" title="Add snippet">+</button>
           </div>
+          <div class="vk-snippet-hint">Tap to send · Long-press to edit · Use <code>\n</code> <code>\t</code> <code>^C</code></div>
           <!-- Row 1: modifier toggles -->
           <div class="vk-row vk-modifiers">
             <button class="vk-key vk-toggle" data-mod="ctrl" id="vk-ctrl">Ctrl</button>
@@ -139,14 +145,11 @@
           </div>
         </div>
 
-        <!-- ===== Links Panel ===== -->
-        <div id="vk-links-panel" class="hidden">
-          <div class="links-panel-header">
-            <span class="links-panel-title">Captured URLs & File Paths</span>
-            <button class="links-panel-clear" onclick="clearCapturedLinks()" title="Clear all">Clear</button>
-          </div>
-          <div id="links-panel-list" class="links-panel-list">
-            <div class="links-panel-empty">No links captured yet. URLs and file paths from terminal output will appear here.</div>
+        <!-- ===== Setting ===== -->
+        <div id="vk-setting-keys" class="hidden">
+          <div class="vk-row">
+            <button type="button" class="vk-key" id="vk-display-btn" title="Display settings" onclick="openModal('display-modal')">🖥 Display</button>
+            <button type="button" class="vk-key" id="vk-diag-btn" title="Connection timing log" onclick="openDiagModal()">🐞 Log</button>
           </div>
         </div>
       </div>
@@ -162,6 +165,65 @@
       </div>
       <button type="button" class="statusbar-footer-btn statusbar-files-btn" id="vk-files-btn" title="File Manager">📁 Files</button>
       <button type="button" class="statusbar-footer-btn" id="switch-group-btn" title="Switch group">⇄ Groups</button>
+    </div>
+
+    <!-- Display / terminal settings -->
+    <div id="display-modal" class="modal hidden">
+      <div class="modal-backdrop" onclick="closeModal('display-modal')"></div>
+      <div class="modal-content" style="max-width:520px;width:92vw;">
+        <h3>🖥 Display settings</h3>
+        <div class="vk-shell-scrollback" title="Max scrollback lines (lower = faster after app switch / lighter memory; higher = scroll back further).">
+          <span class="vk-shell-scrollback-label" style="min-width:96px;text-align:left;">Scrollback</span>
+          <input type="range" id="termhub-scrollback-range" min="100" max="20000" step="100" />
+          <span class="vk-shell-scrollback-value" id="termhub-scrollback-value">5000</span>
+        </div>
+        <div class="vk-shell-scrollback" title="PTY width slack for TUIs (e.g. Cursor CLI): fewer cols than the grid; 0 = same as grid. Saves automatically.">
+          <span class="vk-shell-scrollback-label" style="min-width:96px;text-align:left;">PTY width −</span>
+          <input type="range" id="termhub-pty-margin-range" min="0" max="48" step="1" />
+          <span class="vk-shell-scrollback-value" id="termhub-pty-margin-value">0</span>
+        </div>
+        <div class="vk-shell-scrollback" title="Render throttle: when PTY output exceeds X KB/s, batch writes to 2 fps (500ms). Higher = throttle later; max = off.">
+          <span class="vk-shell-scrollback-label" style="min-width:96px;text-align:left;">Render throttle</span>
+          <input type="range" id="termhub-throttle-range" min="50" max="2000" step="50" />
+          <span class="vk-shell-scrollback-value" id="termhub-throttle-value">300</span>
+        </div>
+        <div class="vk-shell-scrollback" title="Touch-scroll speed inside full-screen apps (tmux/vim, alternate screen). Value = finger travel (character rows) per scroll step — HIGHER = SLOWER. Saves automatically.">
+          <span class="vk-shell-scrollback-label" style="min-width:96px;text-align:left;">tmux scroll</span>
+          <input type="range" id="termhub-altscroll-range" min="0.5" max="6" step="0.5" />
+          <span class="vk-shell-scrollback-value" id="termhub-altscroll-value">2.5</span>
+        </div>
+        <div class="vk-shell-scrollback" title="Flip touch-scroll direction inside full-screen apps (tmux/vim). Saves automatically.">
+          <span class="vk-shell-scrollback-label" style="min-width:96px;text-align:left;">Scroll dir</span>
+          <button type="button" id="termhub-altscroll-dir" class="statusbar-footer-btn" onclick="toggleAltScrollInvert()">Normal</button>
+        </div>
+        <div class="vk-shell-scrollback" title="Mobile only: terminal width is locked per orientation (avoids SIGWINCH storms from address-bar / keyboard jitter). Tap Re-fit to re-measure for the current orientation.">
+          <span class="vk-shell-scrollback-label" style="min-width:96px;text-align:left;">Width lock</span>
+          <span class="vk-shell-scrollback-value" id="termhub-locked-cols-value">auto</span>
+          <button type="button" id="termhub-relock-btn" style="margin-left:8px;padding:2px 8px;font-size:12px;border-radius:4px;border:1px solid #555;background:#222;color:#ddd;">Re-fit</button>
+        </div>
+        <div class="vk-shell-scrollback" title="Loaded scrollback size for the active tab. Scroll up near the top to fetch older chunks.">
+          <span class="vk-shell-scrollback-label" style="min-width:96px;text-align:left;">History size</span>
+          <span class="vk-shell-scrollback-value" id="termhub-history-size">0 KB</span>
+        </div>
+        <div style="margin-top:12px;text-align:right;">
+          <button type="button" class="statusbar-footer-btn" onclick="closeModal('display-modal')">✕ Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Diagnostic timing log (copyable on mobile) -->
+    <div id="diag-modal" class="modal hidden">
+      <div class="modal-backdrop" onclick="closeModal('diag-modal')"></div>
+      <div class="modal-content" style="max-width:680px;width:92vw;">
+        <h3>🐞 Connection timing log</h3>
+        <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+          <button type="button" class="statusbar-footer-btn" onclick="copyDiagLog()">📋 Copy</button>
+          <button type="button" class="statusbar-footer-btn" onclick="clearDiagLog()">🗑 Clear</button>
+          <button type="button" class="statusbar-footer-btn" onclick="closeModal('diag-modal')">✕ Close</button>
+        </div>
+        <textarea id="diag-text" readonly wrap="off"
+          style="width:100%;height:46vh;box-sizing:border-box;font-family:monospace;font-size:12px;line-height:1.4;background:#0b0f14;color:#9fe3c0;border:1px solid #233;border-radius:6px;padding:8px;white-space:pre;overflow:auto;"></textarea>
+      </div>
     </div>
 
     <!-- Text input modal (for iOS voice / IME input + image attach) -->
@@ -196,11 +258,37 @@
       </div>
     </div>
 
+    <!-- Snippet editor modal -->
+    <div id="snippet-modal" class="modal hidden">
+      <div class="modal-backdrop" onclick="closeSnippetModal()"></div>
+      <div class="modal-content">
+        <h3 id="snippet-modal-title">Add Snippet</h3>
+        <label class="snippet-field-label">Label</label>
+        <input type="text" id="snippet-label" class="form-input" placeholder="e.g. git st" maxlength="24" />
+        <label class="snippet-field-label">Text to send</label>
+        <textarea id="snippet-text" class="form-input" rows="3" placeholder="git status&#10;Use \n for newline, \t for tab, ^C for Ctrl+C"></textarea>
+        <label class="snippet-enter-label"><input type="checkbox" id="snippet-enter" /> Press Enter after sending</label>
+        <div class="text-input-actions">
+          <button class="form-btn form-btn-cancel" onclick="closeSnippetModal()">Cancel</button>
+          <button class="form-btn form-btn-cancel" id="snippet-delete-btn" onclick="deleteSnippet()">Delete</button>
+          <button class="form-btn form-btn-save" onclick="saveSnippet()">Save</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Shell picker modal -->
     <div id="shell-modal" class="modal hidden">
       <div class="modal-backdrop" onclick="closeShellModal()"></div>
       <div class="modal-content">
         <h3>New Terminal</h3>
+        <div class="shell-modal-tmux" id="shell-modal-tmux-block">
+          <div class="shell-modal-tmux-head">
+            <span class="shell-modal-tmux-title">Background tmux</span>
+            <button type="button" class="shell-modal-tmux-refresh" id="tmux-sessions-refresh" title="Reload list">↻</button>
+          </div>
+          <div id="tmux-sessions-list" class="tmux-sessions-list"></div>
+          <p id="tmux-sessions-hint" class="tmux-sessions-hint hidden"></p>
+        </div>
         <div id="modal-shell-buttons">
           <!-- Populated dynamically based on server platform -->
         </div>
@@ -236,6 +324,7 @@
         <h3>📂 File Manager</h3>
         <div class="fm-path-row">
           <input type="text" id="fm-path-input" class="form-input dir-path-input" placeholder="Type or paste a path..." />
+          <button class="fm-star-btn" id="fm-copy-path-btn" onclick="copyFmPath()" title="Copy path">📋</button>
           <button class="fm-star-btn" id="fm-star-btn" onclick="toggleFmFavorite()" title="Toggle favorite">☆</button>
         </div>
       </div>
@@ -280,7 +369,9 @@
     <div class="modal-content image-preview-content">
       <button class="image-preview-close" onclick="closeImagePreview()">&times;</button>
       <button class="img-nav-btn img-nav-prev" id="img-nav-prev" onclick="imgPreviewPrev()">‹</button>
-      <img id="image-preview-img" src="" alt="Preview" />
+      <div id="img-zoom-container" class="img-zoom-container">
+        <img id="image-preview-img" src="" alt="Preview" />
+      </div>
       <button class="img-nav-btn img-nav-next" id="img-nav-next" onclick="imgPreviewNext()">›</button>
       <div id="img-name-bubble" class="img-name-bubble hidden"></div>
       <div class="image-preview-footer">
@@ -317,11 +408,11 @@
 
     async function fetchPlatform() {
       try {
-        const resp = await authFetch('/api/platform');
-        const data = await resp.json();
+        const data = await authFetchJson('/api/platform');
         serverPlatform = data.platform;
         availableShells = data.shells || [];
-        defaultShell = availableShells.length > 0 ? availableShells[0].id : 'bash';
+        defaultShell = data.defaultShell
+          || (availableShells.length > 0 ? availableShells[0].id : 'bash');
         renderShellButtons();
       } catch (_) {
         // Fallback: show bash only
@@ -357,6 +448,68 @@
       }
     }
 
+    // ---- Diagnostic timing log (copyable on mobile) ----
+    // Records timestamped events across the login → WS connect → first-output flow so a
+    // user on a phone can copy the timeline and see exactly where any delay happens.
+    const DIAG_LOG = [];
+    function diag(msg) {
+      const now = performance.now();
+      const prev = DIAG_LOG.length ? DIAG_LOG[DIAG_LOG.length - 1].t : now;
+      DIAG_LOG.push({ t: now, dt: now - prev, wall: Date.now(), msg });
+      if (DIAG_LOG.length > 500) DIAG_LOG.shift();
+      try { renderDiag(); } catch (_) {}
+    }
+    function pad(n, w) { return String(n).padStart(w, '0'); }
+    function diagText() {
+      const head = `Web Terminal Hub diag log — ${navigator.userAgent}\nurl=${location.href}\n` +
+        `(columns: +elapsed since page load | Δ gap from previous line | wall clock)\n` +
+        `${'-'.repeat(60)}\n`;
+      const body = DIAG_LOG.map(e => {
+        const d = new Date(e.wall);
+        const wall = `${pad(d.getHours(),2)}:${pad(d.getMinutes(),2)}:${pad(d.getSeconds(),2)}.${pad(d.getMilliseconds(),3)}`;
+        const elapsed = `+${Math.round(e.t)}ms`.padEnd(9);
+        const gap = e.dt >= 1000 ? `Δ${(e.dt/1000).toFixed(1)}s`.padEnd(8) : `Δ${Math.round(e.dt)}ms`.padEnd(8);
+        return `${elapsed} ${gap} ${wall}  ${e.msg}`;
+      }).join('\n');
+      return head + body + '\n';
+    }
+    function renderDiag() {
+      const ta = document.getElementById('diag-text');
+      if (ta && !document.getElementById('diag-modal').classList.contains('hidden')) {
+        ta.value = diagText();
+        ta.scrollTop = ta.scrollHeight;
+      }
+    }
+    function openDiagModal() {
+      const ta = document.getElementById('diag-text');
+      if (ta) { ta.value = diagText(); ta.scrollTop = ta.scrollHeight; }
+      openModal('diag-modal');
+    }
+    function clearDiagLog() {
+      DIAG_LOG.length = 0;
+      diag('log cleared');
+    }
+    async function copyDiagLog() {
+      const text = diagText();
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast('Log copied to clipboard', 'info');
+        return;
+      } catch (_) { /* fall through to legacy path */ }
+      // Fallback for non-secure contexts / older mobile WebViews
+      const ta = document.getElementById('diag-text');
+      try {
+        ta.removeAttribute('readonly');
+        ta.focus();
+        ta.setSelectionRange(0, text.length);
+        const ok = document.execCommand('copy');
+        ta.setAttribute('readonly', '');
+        showToast(ok ? 'Log copied' : 'Select the text and copy manually', ok ? 'info' : 'error');
+      } catch (_) {
+        showToast('Long-press the text to select and copy', 'error');
+      }
+    }
+
     // ---- Auth helpers ----
     function getToken() {
       const match = document.cookie.match(/(?:^|;\s*)token=([^;]*)/);
@@ -367,6 +520,11 @@
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       return `${proto}//${location.host}/ws`;
     }
+
+    // How much scrollback tail the server should replay on (re)connect. Chosen by the frontend
+    // and sent via the WS URL (?tail=); the server clamps it. Compresses well over WS, so a
+    // larger value is cheap. Tune here.
+    const INITIAL_TAIL_BYTES = 256 * 1024;
 
     function handleKicked(msg) {
       alert('Session expired: ' + (msg || 'Another device logged in to this group.'));
@@ -381,6 +539,36 @@
         throw new Error('Unauthorized');
       }
       return resp;
+    }
+
+    /**
+     * Safari / iOS WebKit: calling response.json() on empty or non‑JSON bodies often throws the
+     * vague DOMException “The string did not match the expected pattern.” Always read text() first.
+     */
+    async function authFetchJson(url, opts) {
+      const resp = await authFetch(url, opts);
+      const trimmed = ((await resp.text()) || '').trim();
+      let data = {};
+      if (trimmed) {
+        try {
+          data = JSON.parse(trimmed);
+        } catch (_) {
+          if (!resp.ok) {
+            const looksLikeHtml = /^\s*</.test(trimmed);
+            throw new Error(
+              looksLikeHtml
+                ? `Server routing error (${resp.status}). Reload the hub or restart Node after updating server.js.`
+                : (trimmed.length > 200 ? trimmed.slice(0, 200) + '\u2026' : trimmed)
+            );
+          }
+          throw new Error('Could not parse server response.');
+        }
+      }
+      if (!resp.ok) {
+        const msg = data && (data.error || data.message);
+        throw new Error(msg ? String(msg) : `HTTP ${resp.status}`);
+      }
+      return data;
     }
 
     // ---- Modal animation helpers ----
@@ -407,10 +595,82 @@
     // ---- Shell modal ----
     function openShellModal() {
       openModal('shell-modal');
+      loadTmuxSessions();
     }
     function closeShellModal() {
       closeModal('shell-modal');
     }
+
+    async function fetchTmuxSessionsWithFallback() {
+      const urls = ['/api/terminal/tmux-sessions', '/api/tmux/sessions'];
+      let lastErr = null;
+      for (const url of urls) {
+        try {
+          return await authFetchJson(url);
+        } catch (e) {
+          lastErr = e;
+          const m = String(e && e.message ? e.message : e);
+          const looksLikeMissingRoute = /routing error \(404\)/i.test(m) || /\bHTTP 404\b/i.test(m);
+          if (!looksLikeMissingRoute) throw e;
+        }
+      }
+      throw lastErr || new Error('Failed to list tmux sessions');
+    }
+
+    async function loadTmuxSessions() {
+      const listEl = document.getElementById('tmux-sessions-list');
+      const hintEl = document.getElementById('tmux-sessions-hint');
+      if (!listEl || !hintEl) return;
+      listEl.innerHTML = '<div class="tmux-loading">Loading…</div>';
+      hintEl.classList.add('hidden');
+      hintEl.textContent = '';
+      try {
+        const data = await fetchTmuxSessionsWithFallback();
+        listEl.innerHTML = '';
+        if (!data.tmuxInstalled) {
+          hintEl.textContent = data.hint || 'tmux unavailable on this hub.';
+          hintEl.classList.remove('hidden');
+          return;
+        }
+        const sess = data.sessions || [];
+        if (sess.length === 0) {
+          hintEl.textContent = data.hint || 'No background tmux sessions.';
+          hintEl.classList.remove('hidden');
+          return;
+        }
+        hintEl.classList.add('hidden');
+        for (const row of sess) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'modal-tmux-session-btn';
+          btn.textContent = row.name + (row.attached ? ' \u2022 attached' : '');
+          btn.title = row.attached
+            ? 'This session already has an attached client (shared / multi‑attach)'
+            : 'Attach to tmux session';
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            pickTmuxSession(row.name);
+          });
+          listEl.appendChild(btn);
+        }
+      } catch (err) {
+        listEl.innerHTML = '';
+        hintEl.textContent = err.message ? String(err.message) : 'Failed to list tmux sessions.';
+        hintEl.classList.remove('hidden');
+      }
+    }
+
+    function pickTmuxSession(name) {
+      closeShellModal();
+      createTerminal('bash', '', { tmuxSession: name });
+    }
+
+    document.getElementById('tmux-sessions-refresh').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      loadTmuxSessions();
+    });
 
     // ---- Recent directories (localStorage) ----
     const RECENT_DIRS_KEY = 'termhub_recent_dirs';
@@ -527,7 +787,10 @@
       // Split path into segments
       const parts = fullPath.split(/[\\/]/).filter(Boolean);
 
-      // On Windows, first part is drive like "C:"
+      // On Windows, first part is drive like "C:" (its own absolute anchor). On POSIX the
+      // leading "/" is dropped by filter(Boolean), so re-add it to keep jumps absolute.
+      const isPosixAbs = sep === '/' && fullPath.startsWith('/');
+      const rootPrefix = isPosixAbs ? '/' : '';
       let accumulated = '';
       parts.forEach((part, i) => {
         if (i > 0) {
@@ -538,7 +801,7 @@
         }
 
         accumulated += (i === 0 ? '' : sep) + part;
-        const segPath = i === 0 ? part + sep : accumulated;
+        const segPath = (i === 0 && !isPosixAbs) ? part + sep : rootPrefix + accumulated;
 
         const btn = document.createElement('button');
         btn.className = 'dir-breadcrumb-seg';
@@ -715,7 +978,7 @@
     // Image gallery navigation state
     let fmImageList = [];    // [{name, path, size}, ...] images in current dir
     let fmImageIndex = -1;   // current index in fmImageList
-    const fmImageCache = new Map(); // path -> blob URL (persists until FM closed)
+    // No client-side image cache — always fetch fresh to reflect remote file changes
 
     const TEXT_EXTENSIONS = ['.txt','.js','.ts','.jsx','.tsx','.json','.md','.html','.htm','.css',
       '.py','.sh','.bash','.zsh','.log','.xml','.yaml','.yml','.toml','.ini','.conf','.cfg',
@@ -743,11 +1006,6 @@
       closeModal('file-manager-modal');
       fmClearSelection();
       currentFmPath = '';
-      // Clear image cache
-      for (const blobUrl of fmImageCache.values()) {
-        try { URL.revokeObjectURL(blobUrl); } catch (_) {}
-      }
-      fmImageCache.clear();
       fmImageList = [];
       fmImageIndex = -1;
     }
@@ -785,6 +1043,11 @@
       const bc = document.getElementById('fm-breadcrumb');
       bc.innerHTML = '';
       const parts = fullPath.split(/[\\/]/).filter(Boolean);
+      // POSIX absolute paths start with "/", which filter(Boolean) drops — re-add it so
+      // breadcrumb jumps stay absolute (e.g. "/Users/x", not "Users/x"). On Windows the
+      // first segment ("C:") is itself the absolute anchor, so no prefix is needed.
+      const isPosixAbs = sep === '/' && fullPath.startsWith('/');
+      const rootPrefix = isPosixAbs ? '/' : '';
       let accumulated = '';
       parts.forEach((part, i) => {
         if (i > 0) {
@@ -794,7 +1057,7 @@
           bc.appendChild(sepEl);
         }
         accumulated += (i === 0 ? '' : sep) + part;
-        const segPath = i === 0 ? part + sep : accumulated;
+        const segPath = (i === 0 && !isPosixAbs) ? part + sep : rootPrefix + accumulated;
         const btn = document.createElement('button');
         btn.className = 'dir-breadcrumb-seg';
         btn.textContent = part;
@@ -876,6 +1139,8 @@
 
     function fmSelectFile(entry, fullPath) {
       fmSelectedFile = { ...entry, path: fullPath };
+      // Reflect the tapped file's full path in the path box so it can be read/copied.
+      document.getElementById('fm-path-input').value = fullPath;
       const actionsEl = document.getElementById('fm-file-actions');
       actionsEl.classList.remove('hidden');
       document.getElementById('fm-selected-name').textContent = entry.name;
@@ -900,6 +1165,26 @@
       fmSelectedFile = null;
       document.getElementById('fm-file-actions').classList.add('hidden');
       document.querySelectorAll('#fm-entry-list .dir-entry-row').forEach(r => r.classList.remove('fm-selected'));
+    }
+
+    // Copy the current path box (a file path after tapping a file, else the current dir).
+    async function copyFmPath() {
+      const inp = document.getElementById('fm-path-input');
+      const text = (inp.value || '').trim();
+      if (!text) { showToast('No path to copy', 'error'); return; }
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast('Path copied', 'info');
+        return;
+      } catch (_) { /* fall through to legacy path (non-secure context / old WebView) */ }
+      try {
+        inp.focus();
+        inp.setSelectionRange(0, text.length);
+        const ok = document.execCommand('copy');
+        showToast(ok ? 'Path copied' : 'Select and copy manually', ok ? 'info' : 'error');
+      } catch (_) {
+        showToast('Copy not supported here', 'error');
+      }
     }
 
     // ---- File Manager Actions ----
@@ -1177,6 +1462,7 @@
     function showImageAtIndex(idx, fileInfo) {
       const item = idx >= 0 && idx < fmImageList.length ? fmImageList[idx] : fileInfo;
       if (!item) return;
+      if (window._imgZoomReset) window._imgZoomReset();
       const img = document.getElementById('image-preview-img');
 
       // Track whether this image loaded successfully (to avoid false error toasts)
@@ -1192,26 +1478,22 @@
         if (loaded || !img.src || img.src === location.href) return;
       };
 
-      const cachedUrl = fmImageCache.get(item.path);
-      if (cachedUrl) {
-        img.src = cachedUrl;
-      } else {
-        const url = '/api/fs/preview?path=' + encodeURIComponent(item.path);
-        // Fetch as blob for caching
+      {
+        const url = '/api/fs/preview?path=' + encodeURIComponent(item.path) + '&t=' + Date.now();
         authFetch(url).then(resp => {
           if (!resp.ok) throw new Error('Failed');
           return resp.blob();
         }).then(blob => {
           const blobUrl = URL.createObjectURL(blob);
-          fmImageCache.set(item.path, blobUrl);
           // Only set if still viewing this image
           const curItem = fmImageIndex >= 0 ? fmImageList[fmImageIndex] : null;
           if (curItem && curItem.path === item.path) {
             img.src = blobUrl;
           }
+          // Revoke after load to free memory
+          img.addEventListener('load', () => URL.revokeObjectURL(blobUrl), { once: true });
         }).catch(() => {
-          // Fallback: direct URL load
-          const fallbackUrl = '/api/fs/preview?path=' + encodeURIComponent(item.path);
+          const fallbackUrl = '/api/fs/preview?path=' + encodeURIComponent(item.path) + '&t=' + Date.now();
           img.onerror = () => showToast('Failed to load: ' + item.name, 'error');
           img.src = fallbackUrl;
         });
@@ -1273,26 +1555,11 @@
     }
 
     function preloadAdjacentImages() {
-      // Preload prev and next images into cache
-      const indices = [fmImageIndex - 1, fmImageIndex + 1];
-      for (const i of indices) {
-        if (i < 0 || i >= fmImageList.length) continue;
-        const item = fmImageList[i];
-        if (fmImageCache.has(item.path)) continue;
-        const url = '/api/fs/preview?path=' + encodeURIComponent(item.path);
-        authFetch(url).then(resp => {
-          if (!resp.ok) return;
-          return resp.blob();
-        }).then(blob => {
-          if (blob) {
-            const blobUrl = URL.createObjectURL(blob);
-            fmImageCache.set(item.path, blobUrl);
-          }
-        }).catch(() => {});
-      }
+      // No-op: skip preloading to ensure fresh content on each view
     }
 
     function closeImagePreview() {
+      if (window._imgZoomReset) window._imgZoomReset();
       closeModal('image-preview-modal');
       document.getElementById('image-preview-img').src = '';
       fmImageIndex = -1;
@@ -1314,27 +1581,187 @@
       showToast('Download started: ' + (fileName || 'file'), 'success');
     }
 
-    // Image preview swipe support for mobile
+    // Image preview: pinch-to-zoom, drag-to-pan, double-tap reset, swipe navigation
+    // Transform model: translate(panX,panY) scale(s) with transform-origin 0 0
+    // Element point (x,y) → screen: (x*scale + panX + elemLeft, y*scale + panY + elemTop)
+    // where elemLeft/elemTop is the CSS layout position (flexbox-centered in container)
     (function() {
-      const imgContent = document.querySelector('.image-preview-content');
-      let swipeStartX = 0, swipeStartY = 0, swiping = false;
-      imgContent.addEventListener('touchstart', (e) => {
-        if (fmImageList.length <= 1) return;
-        swipeStartX = e.touches[0].clientX;
-        swipeStartY = e.touches[0].clientY;
-        swiping = true;
-      }, { passive: true });
-      imgContent.addEventListener('touchend', (e) => {
-        if (!swiping) return;
-        swiping = false;
-        const dx = e.changedTouches[0].clientX - swipeStartX;
-        const dy = e.changedTouches[0].clientY - swipeStartY;
-        // Only horizontal swipe, min 50px, and more horizontal than vertical
-        if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-          if (dx < 0) imgPreviewNext();  // swipe left = next
-          else imgPreviewPrev();          // swipe right = prev
+      const container = document.getElementById('img-zoom-container');
+      const img = document.getElementById('image-preview-img');
+
+      let scale = 1, panX = 0, panY = 0;
+      let startScale = 1, startPanX = 0, startPanY = 0;
+      let startDist = 0;
+      // Focal point in image-local coords, cached at pinch start
+      let focalX = 0, focalY = 0;
+      // Element layout position (without transform), cached at gesture start
+      let elemLeft = 0, elemTop = 0;
+      let lastTapTime = 0;
+      // Single-finger tracking for pan vs swipe
+      let oneFingerStartX = 0, oneFingerStartY = 0;
+      let pinching = false;
+
+      function applyTransform() {
+        img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+      }
+
+      // Clamp pan so zoomed image doesn't show empty space beyond its edges
+      function clampPan() {
+        if (scale <= 1) { panX = 0; panY = 0; return; }
+        const cw = container.clientWidth;
+        const ch = container.clientHeight;
+        const ew = img.offsetWidth;
+        const eh = img.offsetHeight;
+
+        // X axis: image screen span = [offX + panX, offX + panX + ew*scale]
+        // where offX = (cw - ew) / 2 from flexbox centering
+        if (ew * scale > cw) {
+          // Don't let image edges come inside the container
+          const maxPanX = (ew - cw) / 2;
+          const minPanX = (cw + ew) / 2 - ew * scale;
+          panX = Math.max(minPanX, Math.min(maxPanX, panX));
+        } else {
+          // Scaled image smaller than container — center it
+          panX = ew * (1 - scale) / 2;
+        }
+        // Y axis
+        if (eh * scale > ch) {
+          const maxPanY = (eh - ch) / 2;
+          const minPanY = (ch + eh) / 2 - eh * scale;
+          panY = Math.max(minPanY, Math.min(maxPanY, panY));
+        } else {
+          panY = eh * (1 - scale) / 2;
+        }
+      }
+
+      // Zoom towards a screen point: adjusts panX/panY so the image content
+      // under (screenX, screenY) stays at that screen position after scale change
+      function zoomToPoint(screenX, screenY, newScale) {
+        const imgRect = img.getBoundingClientRect();
+        // Image-local coord under the screen point
+        const localX = (screenX - imgRect.left) / scale;
+        const localY = (screenY - imgRect.top) / scale;
+        // Element layout position (before transforms)
+        const eLeft = imgRect.left - panX;
+        const eTop = imgRect.top - panY;
+        scale = newScale;
+        // Solve: screenX = eLeft + localX * newScale + newPanX
+        panX = screenX - eLeft - localX * newScale;
+        panY = screenY - eTop - localY * newScale;
+      }
+
+      window._imgZoomReset = function() {
+        scale = 1; panX = 0; panY = 0;
+        img.style.transform = '';
+      };
+
+      function dist(t1, t2) {
+        return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      }
+      function midpoint(t1, t2) {
+        return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
+      }
+
+      container.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+          // Pinch start — cache focal point in image-local coords
+          pinching = true;
+          startScale = scale;
+          startDist = dist(e.touches[0], e.touches[1]);
+          const mid = midpoint(e.touches[0], e.touches[1]);
+          const imgRect = img.getBoundingClientRect();
+          focalX = (mid.x - imgRect.left) / scale;
+          focalY = (mid.y - imgRect.top) / scale;
+          elemLeft = imgRect.left - panX;
+          elemTop = imgRect.top - panY;
+        } else if (e.touches.length === 1) {
+          const now = Date.now();
+          const t = e.touches[0];
+          // Double-tap detection
+          if (now - lastTapTime < 300) {
+            if (scale > 1.05) {
+              // Reset zoom
+              scale = 1; panX = 0; panY = 0;
+            } else {
+              // Zoom to 3x centered on tap point
+              zoomToPoint(t.clientX, t.clientY, 3);
+              clampPan();
+            }
+            applyTransform();
+            lastTapTime = 0;
+            e.preventDefault();
+            return;
+          }
+          lastTapTime = now;
+          // Start single-finger gesture
+          oneFingerStartX = t.clientX;
+          oneFingerStartY = t.clientY;
+          startPanX = panX;
+          startPanY = panY;
+        }
+      }, { passive: false });
+
+      container.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 2 && pinching) {
+          // Pinch zoom — keep focal point under the current midpoint
+          e.preventDefault();
+          const curDist = dist(e.touches[0], e.touches[1]);
+          const newScale = Math.max(1, Math.min(10, startScale * (curDist / startDist)));
+          const curMid = midpoint(e.touches[0], e.touches[1]);
+          // Solve: curMid = elemLeft + focalX * newScale + newPanX
+          scale = newScale;
+          panX = curMid.x - elemLeft - focalX * newScale;
+          panY = curMid.y - elemTop - focalY * newScale;
+          clampPan();
+          applyTransform();
+        } else if (e.touches.length === 1 && scale > 1.05) {
+          // Drag to pan when zoomed
+          e.preventDefault();
+          const t = e.touches[0];
+          panX = startPanX + (t.clientX - oneFingerStartX);
+          panY = startPanY + (t.clientY - oneFingerStartY);
+          clampPan();
+          applyTransform();
+        }
+      }, { passive: false });
+
+      container.addEventListener('touchend', (e) => {
+        if (e.touches.length < 2) {
+          if (pinching && e.touches.length === 1) {
+            // Transitioning from pinch to single-finger — reset pan tracking
+            // so the remaining finger doesn't cause a pan jump
+            oneFingerStartX = e.touches[0].clientX;
+            oneFingerStartY = e.touches[0].clientY;
+            startPanX = panX;
+            startPanY = panY;
+          }
+          pinching = false;
+        }
+        // Swipe navigation only when NOT zoomed and single finger
+        if (e.touches.length === 0 && scale <= 1.05 && fmImageList.length > 1) {
+          const dx = e.changedTouches[0].clientX - oneFingerStartX;
+          const dy = e.changedTouches[0].clientY - oneFingerStartY;
+          if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+            if (dx < 0) imgPreviewNext();
+            else imgPreviewPrev();
+          }
+        }
+        // Snap back to 1x if barely zoomed
+        if (e.touches.length === 0 && scale < 1.05) {
+          scale = 1; panX = 0; panY = 0;
+          applyTransform();
         }
       }, { passive: true });
+
+      // Mouse wheel zoom (desktop) — zoom centered on cursor
+      container.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+        const newScale = Math.max(1, Math.min(10, scale * factor));
+        zoomToPoint(e.clientX, e.clientY, newScale);
+        clampPan();
+        applyTransform();
+      }, { passive: false });
     })();
 
     // Keyboard navigation for image preview
@@ -1363,6 +1790,12 @@
     });
 
     // ---- Virtual keyboard ----
+    function decodeVkSeqString(seqStr) {
+      return seqStr
+        .replace(/\\x1b/g, '\x1b')
+        .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    }
+
     function sendKey(key) {
       if (!activeId || !sessions[activeId]) return;
       const s = sessions[activeId];
@@ -1426,10 +1859,7 @@
 
       // Raw escape sequence (Claude Code keys: Alt+P, Esc+Esc, etc.)
       if (btn.dataset.seq) {
-        const raw = btn.dataset.seq
-          .replace(/\\x1b/g, '\x1b')
-          .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-        sendKey(raw);
+        sendKey(decodeVkSeqString(btn.dataset.seq));
         resetModifiers();
         return;
       }
@@ -1478,9 +1908,8 @@
 
     // Expand/collapse extra rows
     let vkExpanded = false;
-    const VK_MODES = ['claude', 'shell', 'links'];
     function updateModeLabel() {
-      const labelNames = { claude: 'Claude', shell: 'Shell', links: 'Links' };
+      const labelNames = { claude: 'Claude', shell: 'Shell', setting: '⚙ Setting' };
       document.getElementById('vk-mode-label').textContent = labelNames[vkMode] || 'Claude';
     }
 
@@ -1490,10 +1919,168 @@
       vkExpanded = !vkExpanded;
       document.getElementById('vk-expanded').classList.toggle('hidden', !vkExpanded);
       document.getElementById('vk-expand-btn').classList.toggle('vk-active', vkExpanded);
-      if (activeId && sessions[activeId]) {
-        setTimeout(() => fitAndKeepScroll(sessions[activeId]), 100);
-      }
+      // Mobile (locked grid): translate the view up by the drawer height instead of shrinking the
+      // terminal → no reflow. Desktop/non-locked: the drawer is in-flow, so the ResizeObserver +
+      // this fit handle the (cheap, instant) reflow. fitAndKeepScroll is a no-op when unchanged.
+      requestAnimationFrame(() => {
+        if (window.visualViewport) handleViewportChange();
+        // In mobile locked-grid (translate) mode the terminal keeps its exact size, so a fit
+        // would only cause an off-by-one row flash — skip it. Desktop/non-locked still fits.
+        const translate = isMobileTouch() && getMobileLockedCols();
+        if (!translate && activeId && sessions[activeId]) setTimeout(() => fitAndKeepScroll(sessions[activeId]), 60);
+      });
     });
+
+    // ---- Shell snippet strip ----
+    const DEFAULT_SNIPPETS = [
+      { label: 'ls', text: 'ls -la', enter: true },
+      { label: 'git st', text: 'git status', enter: true },
+      { label: 'git d', text: 'git diff', enter: true },
+      { label: 'clear', text: '^L' },
+      { label: '^C', text: '^C' },
+      { label: '^D', text: '^D' },
+      { label: '^R', text: '^R' },
+      { label: 'cd ~', text: 'cd ~', enter: true },
+    ];
+    const SNIPPETS_KEY = 'termhub_snippets_v1';
+    let snippets = [];
+    let editingSnippetIdx = -1;
+
+    function loadSnippets() {
+      try {
+        const raw = localStorage.getItem(SNIPPETS_KEY);
+        if (raw) { snippets = JSON.parse(raw); return; }
+      } catch (_) {}
+      snippets = DEFAULT_SNIPPETS.slice();
+    }
+    function persistSnippets() {
+      try { localStorage.setItem(SNIPPETS_KEY, JSON.stringify(snippets)); } catch (_) {}
+    }
+    function expandSnippet(text) {
+      let out = '';
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === '\\' && i + 1 < text.length) {
+          const n = text[i + 1];
+          if (n === 'n') { out += '\n'; i++; continue; }
+          if (n === 'r') { out += '\r'; i++; continue; }
+          if (n === 't') { out += '\t'; i++; continue; }
+          if (n === '\\') { out += '\\'; i++; continue; }
+        }
+        if (c === '^' && i + 1 < text.length) {
+          const n = text[i + 1].toUpperCase();
+          if (n >= 'A' && n <= 'Z') {
+            out += String.fromCharCode(n.charCodeAt(0) - 64);
+            i++; continue;
+          }
+        }
+        out += c;
+      }
+      return out;
+    }
+    function renderSnippets() {
+      const row = document.getElementById('vk-snippet-row');
+      if (!row) return;
+      row.innerHTML = '';
+      snippets.forEach((sn, idx) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'vk-snippet';
+        btn.textContent = sn.label || sn.text.slice(0, 10);
+        btn.dataset.snippetIdx = idx;
+        row.appendChild(btn);
+      });
+    }
+    function sendSnippetAt(idx) {
+      const sn = snippets[idx];
+      if (!sn) return;
+      let payload = expandSnippet(sn.text);
+      if (sn.enter) payload += '\r';
+      sendKey(payload);
+    }
+
+    // Long-press vs tap on snippet row
+    let snippetLongPressTimer = null;
+    let snippetLongPressFired = false;
+    (function wireSnippetRow() {
+      const row = document.getElementById('vk-snippet-row');
+      if (!row) return;
+      const clear = () => {
+        if (snippetLongPressTimer) { clearTimeout(snippetLongPressTimer); snippetLongPressTimer = null; }
+      };
+      row.addEventListener('pointerdown', (e) => {
+        const btn = e.target.closest('[data-snippet-idx]');
+        if (!btn) return;
+        snippetLongPressFired = false;
+        clear();
+        snippetLongPressTimer = setTimeout(() => {
+          snippetLongPressFired = true;
+          haptic(30);
+          openSnippetModal(parseInt(btn.dataset.snippetIdx));
+        }, 500);
+      });
+      ['pointerup', 'pointerleave', 'pointercancel', 'pointermove'].forEach(ev => {
+        row.addEventListener(ev, (e) => {
+          if (ev === 'pointermove') {
+            // Cancel long-press if finger moved (scrolling)
+            if (snippetLongPressTimer) clear();
+            return;
+          }
+          clear();
+        });
+      });
+      row.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-snippet-idx]');
+        if (!btn) return;
+        e.preventDefault(); e.stopPropagation();
+        if (snippetLongPressFired) { snippetLongPressFired = false; return; }
+        haptic();
+        sendSnippetAt(parseInt(btn.dataset.snippetIdx));
+      }, true);
+    })();
+
+    document.getElementById('vk-snippet-add').addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      openSnippetModal(-1);
+    });
+
+    function openSnippetModal(idx) {
+      editingSnippetIdx = idx;
+      const isEdit = idx >= 0;
+      document.getElementById('snippet-modal-title').textContent = isEdit ? 'Edit Snippet' : 'Add Snippet';
+      document.getElementById('snippet-delete-btn').style.display = isEdit ? '' : 'none';
+      const sn = isEdit ? snippets[idx] : { label: '', text: '', enter: true };
+      document.getElementById('snippet-label').value = sn.label || '';
+      document.getElementById('snippet-text').value = sn.text || '';
+      document.getElementById('snippet-enter').checked = !!sn.enter;
+      document.getElementById('snippet-modal').classList.remove('hidden');
+      setTimeout(() => document.getElementById('snippet-text').focus(), 50);
+    }
+    function closeSnippetModal() {
+      document.getElementById('snippet-modal').classList.add('hidden');
+      editingSnippetIdx = -1;
+    }
+    function saveSnippet() {
+      const label = document.getElementById('snippet-label').value.trim();
+      const text = document.getElementById('snippet-text').value;
+      const enter = document.getElementById('snippet-enter').checked;
+      if (!text) return;
+      const entry = { label: label || text.slice(0, 10), text, enter };
+      if (editingSnippetIdx >= 0) snippets[editingSnippetIdx] = entry;
+      else snippets.push(entry);
+      persistSnippets();
+      renderSnippets();
+      closeSnippetModal();
+    }
+    function deleteSnippet() {
+      if (editingSnippetIdx < 0) return;
+      snippets.splice(editingSnippetIdx, 1);
+      persistSnippets();
+      renderSnippets();
+      closeSnippetModal();
+    }
+    loadSnippets();
+    renderSnippets();
 
     // ---- Text Input Modal (for iOS voice / IME) ----
     document.getElementById('vk-voice-btn').addEventListener('click', (e) => {
@@ -1529,10 +2116,23 @@
       }
     }
 
+    // Server accepts these by extension; anything else (notably iOS HEIC/HEIF) is
+    // transcoded to JPEG client-side before upload (see toUploadableImage).
+    const SERVER_IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'];
+    function imgExt(name) {
+      const m = /\.([a-z0-9]+)$/i.exec(name || '');
+      return m ? m[1].toLowerCase() : '';
+    }
+    function looksLikeImage(f) {
+      if (f.type && f.type.startsWith('image/')) return true;
+      // iOS can hand back an empty MIME type for some Photo Library items — fall back to extension.
+      return [...SERVER_IMAGE_EXTS, 'heic', 'heif', 'avif', 'tif', 'tiff'].includes(imgExt(f.name));
+    }
+
     function handleImageSelect(input) {
       const files = Array.from(input.files || []);
       for (const f of files) {
-        if (!f.type.startsWith('image/')) continue;
+        if (!looksLikeImage(f)) continue;
         const url = URL.createObjectURL(f);
         pendingImages.push({ file: f, previewUrl: url });
       }
@@ -1577,21 +2177,85 @@
       renderImagePreviews();
     }
 
+    // Re-encode an image the server can't accept by extension (e.g. iOS HEIC/HEIF) into a
+    // JPEG via <canvas>. Safari can decode HEIC into an <img>, so this also guarantees the
+    // saved file is a format downstream tools (Claude Code) can actually read.
+    function transcodeToJpeg(file) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          try {
+            let w = img.naturalWidth, h = img.naturalHeight;
+            // Cap dimensions — iOS has a hard canvas pixel limit and huge photos OOM.
+            const MAXD = 4096;
+            if (w > MAXD || h > MAXD) { const s = Math.min(MAXD / w, MAXD / h); w = Math.round(w * s); h = Math.round(h * s); }
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            canvas.toBlob(
+              (blob) => { URL.revokeObjectURL(url); blob ? resolve(blob) : reject(new Error('canvas toBlob returned null')); },
+              'image/jpeg', 0.9
+            );
+          } catch (e) { URL.revokeObjectURL(url); reject(e); }
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('browser could not decode image')); };
+        img.src = url;
+      });
+    }
+
+    // Returns { blob, filename } ready for the server: pass-through if the extension is already
+    // accepted, otherwise transcode to JPEG.
+    async function toUploadableImage(file) {
+      if (SERVER_IMAGE_EXTS.includes(imgExt(file.name))) {
+        return { blob: file, filename: file.name };
+      }
+      const blob = await transcodeToJpeg(file);
+      const base = (file.name || 'image').replace(/\.[^.]*$/, '') || 'image';
+      return { blob, filename: `${base}.jpg` };
+    }
+
     async function uploadImages() {
       if (pendingImages.length === 0) return [];
 
-      const formData = new FormData();
+      showToast('Uploading images...', 'info');
+      // Use XMLHttpRequest + FormData. iOS Safari 26 dropped the request body when uploading
+      // via fetch() (server saw Content-Type but bodyBytes=0); XHR reliably transmits it. Let
+      // the browser set the multipart Content-Type/boundary — don't set it manually.
+      const fd = new FormData();
       for (const img of pendingImages) {
-        formData.append('images', img.file);
+        let blob, filename;
+        try {
+          ({ blob, filename } = await toUploadableImage(img.file));
+        } catch (e) {
+          throw new Error(`Could not process "${img.file.name || 'image'}": ${e.message}`);
+        }
+        // Read bytes into memory and upload a concrete Blob. An iOS photo-picker File reference
+        // can serialize as an empty body (server saw bodyBytes=0); reading it first forces the
+        // data to be materialized and lets us log the actually-readable length.
+        let bytes;
+        try {
+          bytes = await blob.arrayBuffer();
+        } catch (e) {
+          throw new Error(`Could not read "${filename}": ${e.message}`);
+        }
+        fd.append('images', new Blob([bytes], { type: blob.type || 'application/octet-stream' }), filename);
       }
 
-      showToast('Uploading images...', 'info');
-      const resp = await authFetch('/api/upload-images', {
-        method: 'POST',
-        body: formData
+      const data = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload-images');
+        xhr.withCredentials = true; // send auth cookies
+        xhr.onload = () => {
+          if (xhr.status === 401) { window.location.href = '/welcome'; reject(new Error('Unauthorized')); return; }
+          let d = {};
+          try { d = JSON.parse(xhr.responseText); } catch (_) {}
+          if (xhr.status >= 200 && xhr.status < 300 && !d.error) resolve(d);
+          else reject(new Error(d.error || `upload failed (${xhr.status})`));
+        };
+        xhr.onerror = () => { reject(new Error('Network error during upload')); };
+        xhr.send(fd);
       });
-      const data = await resp.json();
-      if (data.error) throw new Error(data.error);
       return data.files; // [{ name, path, size }]
     }
 
@@ -1767,17 +2431,6 @@
           attachPaths.push(...uploaded.map(f => f.path));
         }
 
-        // Build final text: user text + attached file paths
-        let finalText = text || '';
-        if (attachPaths.length > 0) {
-          const pathStr = attachPaths.join(' ');
-          if (finalText) {
-            finalText = finalText + ' ' + pathStr;
-          } else {
-            finalText = pathStr;
-          }
-        }
-
         // Close modal
         area.value = '';
         updateTextInputInfo();
@@ -1785,17 +2438,37 @@
         area.blur();
         clearAllAttachments();
 
-        // Send after modal dismissed (with chunking for long text)
+        // Send after modal dismissed
+        // Each attachment path is sent separately with a delay so the
+        // receiving process (e.g. Claude Code) can register each file.
+        const ATTACH_DELAY = 500; // ms between each attachment path
         setTimeout(async () => {
-          if (finalText) {
-            await sendChunked(s.ws, finalText);
+          if (text) {
+            await sendChunked(s.ws, text);
+          }
+          if (attachPaths.length > 0) {
+            for (let i = 0; i < attachPaths.length; i++) {
+              if (i > 0 || text) {
+                // Add a space separator before this path
+                s.ws.send(JSON.stringify({ type: 'input', data: ' ' }));
+              }
+              await sendChunked(s.ws, attachPaths[i]);
+              // Wait between each attachment so the target can process it
+              if (i < attachPaths.length - 1) {
+                await new Promise(r => setTimeout(r, ATTACH_DELAY));
+              }
+            }
           }
           if (withEnter) {
+            // Extra delay before Enter when attachments are present
+            if (attachPaths.length > 0) {
+              await new Promise(r => setTimeout(r, ATTACH_DELAY));
+            }
             s.ws.send(JSON.stringify({ type: 'input', data: '\r' }));
           }
           showToast(attachPaths.length > 0
             ? `Sent with ${attachPaths.length} attachment${attachPaths.length > 1 ? 's' : ''}`
-            : `Sent (${finalText.length} chars)`, 'success');
+            : `Sent (${(text || '').length} chars)`, 'success');
           setTimeout(() => {
             if (activeId && sessions[activeId] && sessions[activeId].terminal) {
               sessions[activeId].terminal.focus();
@@ -1861,79 +2534,29 @@
 
     // ---- Virtual keyboard mode toggle (Shell / Claude) ----
     let vkMode = localStorage.getItem('termhub_vk_mode') || 'claude';
+    if (vkMode === 'links') vkMode = 'claude';
 
     function switchVkMode(mode) {
       vkMode = mode;
-      // Only persist shell/claude preference (not links — it's a temporary view)
-      if (mode !== 'links') localStorage.setItem('termhub_vk_mode', mode);
+      localStorage.setItem('termhub_vk_mode', mode);
       document.getElementById('vk-claude-keys').classList.toggle('hidden', mode !== 'claude');
       document.getElementById('vk-shell-keys').classList.toggle('hidden', mode !== 'shell');
-      document.getElementById('vk-links-panel').classList.toggle('hidden', mode !== 'links');
+      document.getElementById('vk-setting-keys').classList.toggle('hidden', mode !== 'setting');
       document.getElementById('vk-mode-claude').classList.toggle('active', mode === 'claude');
       document.getElementById('vk-mode-shell').classList.toggle('active', mode === 'shell');
-      document.getElementById('vk-mode-links').classList.toggle('active', mode === 'links');
+      document.getElementById('vk-mode-setting').classList.toggle('active', mode === 'setting');
       updateModeLabel();
-      // Re-fit terminal after keyboard layout change
-      if (activeId && sessions[activeId]) {
-        setTimeout(() => fitAndKeepScroll(sessions[activeId]), 100);
-      }
+      // Different panels have different heights — re-apply the drawer translate (mobile, no
+      // reflow). Skip the fit in translate mode (avoids an off-by-one flash); desktop still fits.
+      requestAnimationFrame(() => {
+        if (window.visualViewport) handleViewportChange();
+        const translate = isMobileTouch() && getMobileLockedCols();
+        if (!translate && activeId && sessions[activeId]) setTimeout(() => fitAndKeepScroll(sessions[activeId]), 60);
+      });
     }
 
     // Apply saved mode on load
     switchVkMode(vkMode);
-
-    // ---- Links panel rendering ----
-    function renderLinksPanel() {
-      const list = document.getElementById('links-panel-list');
-      const badge = document.getElementById('vk-links-badge');
-
-      // Update badge count
-      badge.textContent = capturedLinks.length;
-      badge.classList.toggle('hidden', capturedLinks.length === 0);
-
-      if (capturedLinks.length === 0) {
-        list.innerHTML = '<div class="links-panel-empty">No links captured yet. URLs and file paths from terminal output will appear here.</div>';
-        return;
-      }
-
-      const frag = document.createDocumentFragment();
-      for (const link of capturedLinks) {
-        const row = document.createElement('div');
-        row.className = 'links-panel-row';
-        row.dataset.type = link.type;
-
-        const icon = document.createElement('span');
-        icon.className = 'links-panel-icon';
-        icon.textContent = link.type === 'url' ? '🌐' : '📄';
-
-        const text = document.createElement('span');
-        text.className = 'links-panel-text';
-        text.textContent = link.text;
-        text.title = link.text;
-
-        row.appendChild(icon);
-        row.appendChild(text);
-
-        row.addEventListener('click', () => {
-          if (link.type === 'url') {
-            window.open(link.text, '_blank', 'noopener');
-          } else {
-            openFileInViewer(link.text);
-          }
-        });
-
-        frag.appendChild(row);
-      }
-
-      list.innerHTML = '';
-      list.appendChild(frag);
-    }
-
-    function clearCapturedLinks() {
-      capturedLinks.length = 0;
-      capturedLinksSet.clear();
-      renderLinksPanel();
-    }
 
     // ---- Terminal theme (single source of truth) ----
     const TERMINAL_THEME = {
@@ -1943,10 +2566,22 @@
       selectionBackground: '#1f4068'
     };
 
+    /** Matches FitAddon probe + live terminal so PTY.cols tracks visual cell width on each OS */
+    const TERMINAL_FONT_FAMILY = (() => {
+      const ua = navigator.userAgent || '';
+      if (navigator.maxTouchPoints > 0 && /iPhone|iPad|iPod/i.test(ua)) {
+        return "'Menlo','SF Mono','Courier New','Consolas',monospace";
+      }
+      if (navigator.maxTouchPoints > 0 && /Android/i.test(ua)) {
+        return "'Droid Sans Mono','Courier New','Consolas',monospace";
+      }
+      return "'Cascadia Code','Fira Code','Consolas','Courier New',monospace";
+    })();
+
     const SCROLLBACK_STORAGE_KEY = 'termhub_scrollback_lines';
-    const SCROLLBACK_MIN = 10;
-    const SCROLLBACK_MAX = 1000;
-    const SCROLLBACK_DEFAULT = 300;
+    const SCROLLBACK_MIN = 100;
+    const SCROLLBACK_MAX = 20000;
+    const SCROLLBACK_DEFAULT = 5000;
 
     function getScrollbackLines() {
       const raw = parseInt(localStorage.getItem(SCROLLBACK_STORAGE_KEY), 10);
@@ -1969,31 +2604,68 @@
 
     // ---- Zoom: step font sizes ----
     const ZOOM_LEVELS = [9, 11, 13, 16, 20];
-    // Default: 11px for all devices
-    let zoomIndex = 1;
+    const ZOOM_MIN_INDEX = 0;
+    const ZOOM_MAX_INDEX = ZOOM_LEVELS.length - 1;
+    function clampZoomIndex(i) {
+      return Math.max(ZOOM_MIN_INDEX, Math.min(ZOOM_MAX_INDEX, i));
+    }
+    const ZOOM_KEY = 'termhub_zoom_index';
+    function readZoomIndex() {
+      try {
+        const v = parseInt(localStorage.getItem(ZOOM_KEY), 10);
+        if (Number.isFinite(v)) return v;
+      } catch (_) {}
+      return 1; // default 11px
+    }
+    let zoomIndex = clampZoomIndex(readZoomIndex());
+
+    function syncZoomButtons() {
+      const down = document.getElementById('vk-zoom-down');
+      const up = document.getElementById('vk-zoom-up');
+      if (!down || !up) return;
+      down.disabled = zoomIndex <= ZOOM_MIN_INDEX;
+      up.disabled = zoomIndex >= ZOOM_MAX_INDEX;
+    }
 
     function applyZoom() {
+      zoomIndex = clampZoomIndex(zoomIndex);
+      try { localStorage.setItem(ZOOM_KEY, String(zoomIndex)); } catch (_) {}
       const size = ZOOM_LEVELS[zoomIndex];
       document.getElementById('vk-zoom-label').textContent = size + 'px';
-      // Apply to all terminal sessions (skip file viewers)
+      syncZoomButtons();
+      // Clear the mobile cols lock: it only ever GROWS (never shrinks), so when the font gets
+      // BIGGER (needs FEWER cols) the stale lock keeps the old wider grid and text overflows
+      // until a manual Re-fit. A font change is an explicit intent to re-measure, so drop the
+      // lock and let the fit below recompute the correct (possibly smaller) column count.
+      try { clearMobileLockedGrid(); } catch (_) {}
+      // Apply the new font size to all terminals first, then fit on a later frame. xterm
+      // re-measures the character cell asynchronously after a fontSize change; fitting in the
+      // same tick uses the STALE cell size and computes the wrong column count. Deferring the
+      // fit lets the re-measure land first.
       for (const [id, s] of Object.entries(sessions)) {
         if (!s.terminal) continue;
         s.terminal.options.fontSize = size;
-        fitAndKeepScroll(s);
       }
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        for (const [id, s] of Object.entries(sessions)) {
+          if (!s.terminal) continue;
+          try { fitAndKeepScroll(s); } catch (_) {}
+        }
+      }));
     }
 
     document.getElementById('vk-zoom-down').addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
-      if (zoomIndex > 0) { zoomIndex--; applyZoom(); }
+      if (zoomIndex > ZOOM_MIN_INDEX) { zoomIndex--; applyZoom(); }
     });
     document.getElementById('vk-zoom-up').addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
-      if (zoomIndex < ZOOM_LEVELS.length - 1) { zoomIndex++; applyZoom(); }
+      if (zoomIndex < ZOOM_MAX_INDEX) { zoomIndex++; applyZoom(); }
     });
 
     // Initialize zoom label
     document.getElementById('vk-zoom-label').textContent = ZOOM_LEVELS[zoomIndex] + 'px';
+    syncZoomButtons();
 
     (function initScrollbackUI() {
       const range = document.getElementById('termhub-scrollback-range');
@@ -2045,11 +2717,11 @@
         let newIndex = initialZoomIndex;
         if (ratio > 1.3) newIndex = Math.min(initialZoomIndex + 1, ZOOM_LEVELS.length - 1);
         if (ratio > 1.7) newIndex = Math.min(initialZoomIndex + 2, ZOOM_LEVELS.length - 1);
-        if (ratio < 0.75) newIndex = Math.max(initialZoomIndex - 1, 0);
-        if (ratio < 0.55) newIndex = Math.max(initialZoomIndex - 2, 0);
+        if (ratio < 0.75) newIndex = Math.max(initialZoomIndex - 1, ZOOM_MIN_INDEX);
+        if (ratio < 0.55) newIndex = Math.max(initialZoomIndex - 2, ZOOM_MIN_INDEX);
 
         if (newIndex !== zoomIndex) {
-          zoomIndex = newIndex;
+          zoomIndex = clampZoomIndex(newIndex);
           applyZoom();
           haptic(5);
         }
@@ -2080,6 +2752,15 @@
     function initScrollTracking(s) {
       s._userScrolledUp = false;
       s._suppressScrollTrack = false;
+      s._historyPromptPending = false;
+      s._userGestureSinceReset = false; // require a real touch/wheel/key before prompt can fire
+
+      const armGesture = () => { s._userGestureSinceReset = true; };
+      const opts = { passive: true };
+      s.container.addEventListener('touchstart', armGesture, opts);
+      s.container.addEventListener('wheel', armGesture, opts);
+      s.container.addEventListener('keydown', armGesture, opts);
+      s.container.addEventListener('pointerdown', armGesture, opts);
 
       // When the viewport scrolls, check if user is NOT at bottom
       s.terminal.onScroll(() => {
@@ -2089,7 +2770,95 @@
         if (isAlternateScreenTerminal(s.terminal)) return;
         const buf = s.terminal.buffer.active;
         s._userScrolledUp = buf.viewportY < buf.baseY;
+        // At very top → prompt user to load older scrollback (5MB chunk).
+        // Guarded by _historyPromptPending so we don't re-prompt while still at top.
+        if (buf.viewportY === 0) {
+          if (!s._loadingHistory && !s._historyPromptPending &&
+              s._userGestureSinceReset === true &&
+              typeof s._oldestLoadedLine === 'number' &&
+              s._oldestLoadedLine > (s._firstLineIndex || 0)) {
+            s._historyPromptPending = true;
+            const remaining = s._oldestLoadedLine - s._firstLineIndex;
+            setTimeout(() => {
+              const ok = confirm(`Load older history? (~1MB chunk, ${remaining} more lines available on server)`);
+              if (ok) maybeLoadOlderHistory(s);
+            }, 0);
+          }
+        } else if (buf.viewportY > 5) {
+          s._historyPromptPending = false;
+        }
       });
+    }
+
+    function formatBytes(n) {
+      if (n < 1024) return `${n} B`;
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+      return `${(n / 1024 / 1024).toFixed(2)} MB`;
+    }
+    function updateHistorySizeIndicator() {
+      const el = document.getElementById('termhub-history-size');
+      if (!el) return;
+      const s = activeId && sessions[activeId];
+      if (!s || typeof s._history !== 'string') { el.textContent = '—'; return; }
+      el.textContent = formatBytes(s._history.length);
+    }
+
+    async function maybeLoadOlderHistory(s) {
+      if (!s || s._loadingHistory) return;
+      if (typeof s._oldestLoadedLine !== 'number') return;
+      if (s._oldestLoadedLine <= (s._firstLineIndex || 0)) return; // nothing older available
+      s._loadingHistory = true;
+      try {
+        if (!s.id) return;
+        const url = `/api/terminal/${s.id}/scrollback?toLine=${s._oldestLoadedLine}&maxBytes=${1 * 1024 * 1024}`;
+        const resp = await authFetchJson(url);
+        if (!resp || !resp.data || resp.startLine >= s._oldestLoadedLine) return;
+        // Prepend to client history, update bounds. Keep raw bytes verbatim.
+        s._history = resp.data + (s._history || '');
+        s._oldestLoadedLine = resp.startLine;
+        s._firstLineIndex = resp.firstLineIndex;
+        // Re-render: size xterm scrollback to actual line count so cells don't OOM on mobile
+        // (fixed 500k × 80c × ~8B/cell ≈ 320MB). Estimate from \n count + a small headroom; cap
+        // at 200k as a safety ceiling.
+        const term = s.terminal;
+        const lineCount = (s._history.match(/\n/g) || []).length;
+        const desired = Math.min(200000, Math.max(term.options.scrollback || 1, lineCount + 1000));
+        if (desired !== term.options.scrollback) term.options.scrollback = desired;
+        s._suppressScrollTrack = true;
+        term.reset();
+        term.write(s._history, () => {
+          // After re-render, keep user near where they were (top of just-loaded chunk).
+          term.scrollToTop();
+          requestAnimationFrame(() => { s._suppressScrollTrack = false; });
+        });
+        if (s.id === activeId) updateHistorySizeIndicator();
+        showToast(`Loaded ${(resp.bytes / 1024 / 1024).toFixed(1)}MB older history`, 'info');
+      } catch (err) {
+        console.error('scrollback load failed', err);
+      } finally {
+        s._loadingHistory = false;
+      }
+    }
+
+    // Write data to terminal, preserving scroll position when user has scrolled up.
+    // xterm.js write() auto-scrolls to bottom even when the user isn't at the bottom,
+    // which fights mouse-wheel scrollback (touch/selection are unaffected because xterm
+    // suppresses auto-scroll during those gestures internally).
+    function scrollAwareWrite(s, data) {
+      if (!s || !s.terminal) return;
+      if (s._userScrolledUp && !isAlternateScreenTerminal(s.terminal)) {
+        const viewport = s.container.querySelector('.xterm-viewport');
+        const savedScrollTop = viewport ? viewport.scrollTop : null;
+        s._suppressScrollTrack = true;
+        s.terminal.write(data, () => {
+          if (viewport && savedScrollTop !== null) {
+            viewport.scrollTop = savedScrollTop;
+          }
+          requestAnimationFrame(() => { s._suppressScrollTrack = false; });
+        });
+      } else {
+        s.terminal.write(data);
+      }
     }
 
     // Snap terminal to bottom, suppressing scroll tracking so the snap
@@ -2105,6 +2874,388 @@
       });
     }
 
+    function clearFitBackoffTimers(s) {
+      if (!s || !Array.isArray(s._fitBackoffTids)) return;
+      for (const tid of s._fitBackoffTids) clearTimeout(tid);
+      s._fitBackoffTids = [];
+    }
+
+    // Guard: proposeDimensions() / safeFit reject — absolute floor for cols
+    const MIN_FIT_COLS = 20;
+
+    /** PTY cols slack vs xterm grid (Cursor CLI / TUIs); UI: Shell ▾ → PTY−. Max 48, stored in localStorage. */
+    const PTY_COL_MARGIN_KEY = 'termhub_pty_col_margin';
+    const PTY_COL_MARGIN_MAX = 48;
+
+    function readPtyColWrapMarginFromStorage() {
+      const raw = parseInt(localStorage.getItem(PTY_COL_MARGIN_KEY), 10);
+      if (Number.isFinite(raw) && raw >= 0 && raw <= PTY_COL_MARGIN_MAX) return raw;
+      return 0;
+    }
+
+    let ptyColWrapMargin = readPtyColWrapMarginFromStorage();
+
+    function ptyColsForGrid(gridCols) {
+      if (!Number.isFinite(gridCols)) return MIN_FIT_COLS;
+      return Math.max(MIN_FIT_COLS, Math.trunc(gridCols) - ptyColWrapMargin);
+    }
+
+    /** When safeFit rejects a transient narrow layout (iOS keyboard), retry so PTY cols match grid. */
+    function scheduleFitBackoffRetries(s) {
+      if (!s?.terminal || !navigator.maxTouchPoints) return;
+      clearFitBackoffTimers(s);
+      s._fitBackoffTids = [];
+      const delays = [120, 360, 900];
+      for (const ms of delays) {
+        const tid = setTimeout(() => {
+          if (!s.terminal) return;
+          fitAndKeepScroll(s);
+        }, ms);
+        s._fitBackoffTids.push(tid);
+      }
+    }
+
+    /** Push PTY winsize (grid cols minus ptyColWrapMargin) + rows (deduped). */
+    function resizePtyColsIfChanged(s) {
+      if (!s?.terminal || !s.ws || s.ws.readyState !== WebSocket.OPEN) return;
+      try {
+        const gridCols = s.terminal.cols;
+        const rows = s.terminal.rows;
+        if (!Number.isFinite(gridCols) || !Number.isFinite(rows)) return;
+        const cols = ptyColsForGrid(gridCols);
+        const sig = `${cols}:${rows}`;
+        if (s._ptyGeomSig === sig) return;
+        s._ptyGeomSig = sig;
+        s.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        console.log('[pty resize]', { gridCols, ptyCols: cols, rows, margin: ptyColWrapMargin });
+      } catch (_) {}
+    }
+
+    // Force the running app (a TUI like Claude Code) to repaint its CURRENT screen by nudging
+    // the PTY size, which raises SIGWINCH. Scrollback replay can't reconstruct a cursor-
+    // addressed TUI (its visible text lives in transient screen state, not linear scrollback),
+    // but the app redraws on resize — this automates the manual "resize to fix it" workaround.
+    function forcePtyRepaint(s) {
+      if (!s?.terminal || !s.ws || s.ws.readyState !== WebSocket.OPEN) return;
+      try {
+        const gridCols = s.terminal.cols, rows = s.terminal.rows;
+        if (!Number.isFinite(gridCols) || !Number.isFinite(rows) || rows < 2) return;
+        const cols = ptyColsForGrid(gridCols);
+        s.ws.send(JSON.stringify({ type: 'resize', cols, rows: rows - 1 }));
+        setTimeout(() => {
+          if (s.ws && s.ws.readyState === WebSocket.OPEN) {
+            s.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+            s._ptyGeomSig = `${cols}:${rows}`;
+          }
+        }, 120);
+      } catch (_) {}
+    }
+
+    function setPtyColWrapMargin(next) {
+      const n = Math.max(0, Math.min(PTY_COL_MARGIN_MAX, parseInt(next, 10) || 0));
+      ptyColWrapMargin = n;
+      try {
+        localStorage.setItem(PTY_COL_MARGIN_KEY, String(n));
+      } catch (_) {}
+      for (const s of Object.values(sessions)) {
+        if (!s?.terminal || !s.ws || s.ws.readyState !== WebSocket.OPEN) continue;
+        s._ptyGeomSig = null;
+        resizePtyColsIfChanged(s);
+      }
+    }
+
+    (function initPtyMarginUI() {
+      const range = document.getElementById('termhub-pty-margin-range');
+      const valEl = document.getElementById('termhub-pty-margin-value');
+      if (!range || !valEl) return;
+      range.value = String(ptyColWrapMargin);
+      valEl.textContent = String(ptyColWrapMargin);
+      range.addEventListener('input', () => {
+        valEl.textContent = range.value;
+        setPtyColWrapMargin(parseInt(range.value, 10));
+      });
+    })();
+
+    /** Render-throttle: when PTY data rate exceeds threshold, coalesce writes to 2 fps. */
+    const RENDER_THROTTLE_KEY = 'termhub_render_throttle_kbps';
+    const RENDER_THROTTLE_MAX = 2000;          // slider max — treated as "off"
+    const RENDER_THROTTLE_FLUSH_MS = 500;      // 2 fps during burst
+
+    function readRenderThrottleKbps() {
+      const raw = parseInt(localStorage.getItem(RENDER_THROTTLE_KEY), 10);
+      if (Number.isFinite(raw) && raw >= 50 && raw <= RENDER_THROTTLE_MAX) return raw;
+      return 300;
+    }
+    let renderThrottleKbps = readRenderThrottleKbps();
+
+    function setRenderThrottleKbps(next) {
+      const n = Math.max(50, Math.min(RENDER_THROTTLE_MAX, parseInt(next, 10) || 300));
+      renderThrottleKbps = n;
+      try { localStorage.setItem(RENDER_THROTTLE_KEY, String(n)); } catch (_) {}
+      // Immediate flush so a relaxed threshold takes effect right away.
+      for (const s of Object.values(sessions)) flushPendingWrite(s);
+    }
+
+    function flushPendingWrite(s) {
+      if (!s) return;
+      if (s._wrFlushTid) { clearTimeout(s._wrFlushTid); s._wrFlushTid = null; }
+      if (!s._wrBuf) return;
+      const buf = s._wrBuf; s._wrBuf = '';
+      s._wrLastFlush = performance.now();
+      try { scrollAwareWrite(s, buf); } catch (_) {}
+    }
+
+    // Collapse long runs of pure-empty lines. Cursor-addressed TUIs (Claude Code) emit huge
+    // numbers of blank "\r\n" lines to scroll/reserve space while redrawing in place; replaying
+    // those into scrollback leaves a massive blank expanse above the content. Only fully-empty
+    // lines are squeezed — any line containing text OR an escape sequence is left untouched, so
+    // cursor-control bytes are preserved. (The live screen is repainted via SIGWINCH on connect.)
+    function collapseBlankRuns(data) {
+      if (!data || data.length < 4096) return data;
+      return data.replace(/(?:\r\n[ \t]*){6,}/g, '\r\n\r\n\r\n');
+    }
+
+    function throttledWrite(s, data) {
+      if (!s || !s.terminal) return;
+      // "off" — bypass entirely
+      if (renderThrottleKbps >= RENDER_THROTTLE_MAX) {
+        scrollAwareWrite(s, data);
+        return;
+      }
+      const now = performance.now();
+      if (!s._wrWindowStart || now - s._wrWindowStart > 1000) {
+        s._wrWindowStart = now;
+        s._wrWindowBytes = 0;
+      }
+      s._wrWindowBytes += data.length;
+      const burst = s._wrWindowBytes > renderThrottleKbps * 1024;
+
+      if (!burst && !s._wrBuf) {
+        s._wrLastFlush = now;
+        scrollAwareWrite(s, data);
+        return;
+      }
+      s._wrBuf = (s._wrBuf || '') + data;
+      if (s._wrFlushTid) return;
+      const wait = Math.max(0, RENDER_THROTTLE_FLUSH_MS - (now - (s._wrLastFlush || 0)));
+      s._wrFlushTid = setTimeout(() => flushPendingWrite(s), wait);
+    }
+
+    (function initRenderThrottleUI() {
+      const range = document.getElementById('termhub-throttle-range');
+      const valEl = document.getElementById('termhub-throttle-value');
+      if (!range || !valEl) return;
+      const render = (n) => (n >= RENDER_THROTTLE_MAX ? 'off' : String(n));
+      range.value = String(renderThrottleKbps);
+      valEl.textContent = render(renderThrottleKbps);
+      range.addEventListener('input', () => { valEl.textContent = render(parseInt(range.value, 10) || 0); });
+      range.addEventListener('change', () => { setRenderThrottleKbps(parseInt(range.value, 10)); });
+    })();
+
+    /**
+     * Mobile only: lock terminal cols per orientation. Captured on the first successful safeFit
+     * after a re-measure (or first launch) and re-applied on every subsequent fit so address-bar /
+     * keyboard jitter cannot SIGWINCH the PTY repeatedly. Rows still float (cheaper reflow).
+     */
+    const MOBILE_LOCK_COLS_P = 'termhub_mobile_lock_cols_portrait';
+    const MOBILE_LOCK_COLS_L = 'termhub_mobile_lock_cols_landscape';
+    const MOBILE_LOCK_ROWS_P = 'termhub_mobile_lock_rows_portrait';
+    const MOBILE_LOCK_ROWS_L = 'termhub_mobile_lock_rows_landscape';
+    const MIN_FIT_ROWS = 4;
+    // Touch laptops (Surface etc.) report maxTouchPoints>0 but have a mouse — exclude them via
+    // (hover:none) + (pointer:coarse), which only matches phones/tablets without a fine pointer.
+    const isMobileTouch = () => {
+      try {
+        return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+      } catch (_) {
+        return navigator.maxTouchPoints > 0;
+      }
+    };
+    function currentOrientationKey() {
+      return window.innerHeight >= window.innerWidth ? 'portrait' : 'landscape';
+    }
+    function mobileColsKey() {
+      return currentOrientationKey() === 'portrait' ? MOBILE_LOCK_COLS_P : MOBILE_LOCK_COLS_L;
+    }
+    function mobileRowsKey() {
+      return currentOrientationKey() === 'portrait' ? MOBILE_LOCK_ROWS_P : MOBILE_LOCK_ROWS_L;
+    }
+    function getMobileLockedCols() {
+      if (!isMobileTouch()) return null;
+      const raw = parseInt(localStorage.getItem(mobileColsKey()), 10);
+      return Number.isFinite(raw) && raw >= MIN_FIT_COLS ? raw : null;
+    }
+    function getMobileLockedRows() {
+      if (!isMobileTouch()) return null;
+      const raw = parseInt(localStorage.getItem(mobileRowsKey()), 10);
+      return Number.isFinite(raw) && raw >= MIN_FIT_ROWS ? raw : null;
+    }
+    function setMobileLockedGrid(cols, rows) {
+      if (!isMobileTouch()) return;
+      if (!Number.isFinite(cols) || cols < MIN_FIT_COLS) return;
+      if (!Number.isFinite(rows) || rows < MIN_FIT_ROWS) return;
+      try {
+        localStorage.setItem(mobileColsKey(), String(cols));
+        localStorage.setItem(mobileRowsKey(), String(rows));
+      } catch (_) {}
+      refreshMobileLockUI();
+    }
+    function clearMobileLockedGrid() {
+      try {
+        localStorage.removeItem(mobileColsKey());
+        localStorage.removeItem(mobileRowsKey());
+      } catch (_) {}
+      refreshMobileLockUI();
+    }
+    /** Soft keyboard probably up — used to gate capture (rows would be wrong with keyboard up). */
+    function isSoftKeyboardLikelyUp() {
+      const vv = window.visualViewport;
+      if (!vv) return false;
+      return (window.innerHeight - vv.height - (vv.offsetTop || 0)) > 80;
+    }
+    function refreshMobileLockUI() {
+      const valEl = document.getElementById('termhub-locked-cols-value');
+      if (!valEl) return;
+      if (!isMobileTouch()) { valEl.textContent = 'desktop'; return; }
+      const c = getMobileLockedCols(), r = getMobileLockedRows();
+      const o = currentOrientationKey()[0];
+      valEl.textContent = (c && r) ? `${c}×${r} (${o})` : `auto (${o})`;
+    }
+
+    (function initMobileLockUI() {
+      refreshMobileLockUI();
+      const btn = document.getElementById('termhub-relock-btn');
+      if (btn) {
+        btn.addEventListener('click', () => {
+          clearMobileLockedGrid();
+          // Reset translate so the next fit measures the full container
+          try {
+            const app = document.getElementById('app');
+            if (app) app.style.transform = '';
+          } catch (_) {}
+          for (const sess of Object.values(sessions)) {
+            try { fitAndKeepScroll(sess); } catch (_) {}
+          }
+        });
+      }
+      window.addEventListener('orientationchange', () => setTimeout(refreshMobileLockUI, 300));
+      window.addEventListener('resize', refreshMobileLockUI);
+    })();
+
+    /** Observe mounted terminal containers — catches iOS keyboard / layout jitter better than window.resize alone. */
+    function attachTerminalResizeObserver(s) {
+      if (!s?.container || typeof ResizeObserver === 'undefined') return;
+      try {
+        if (s._resizeObserver) s._resizeObserver.disconnect();
+      } catch (_) {}
+      let debTimer = null;
+      s._resizeObserver = new ResizeObserver(() => {
+        if (!s.terminal) return;
+        const st = getComputedStyle(s.container);
+        if (st.display === 'none') return;
+        if ((s.container.clientWidth || 0) < 8 || (s.container.clientHeight || 0) < 8) return;
+        // In mobile locked-grid mode the layout is driven by handleViewportChange (translate),
+        // and the grid is intentionally fixed — container jitter from the keyboard/drawer/address
+        // bar must NOT re-fit (that's the whole point of the lock, and it caused an off-by-one
+        // row flash when opening the drawer). Let translate handle it.
+        if (isMobileTouch() && getMobileLockedCols()) return;
+        clearTimeout(debTimer);
+        debTimer = setTimeout(() => {
+          debTimer = null;
+          if (!s.terminal) return;
+          if (getComputedStyle(s.container).display === 'none') return;
+          fitAndKeepScroll(s);
+        }, 42);
+      });
+      s._resizeObserver.observe(s.container);
+    }
+
+    function detachTerminalResizeObserver(s) {
+      try {
+        if (s?._resizeObserver) {
+          s._resizeObserver.disconnect();
+          s._resizeObserver = null;
+        }
+      } catch (_) {}
+    }
+
+    /**
+     * FitAddon's proposeDimensions hard-subtracts ~14px (overviewRuler.width || 14) from the
+     * available width as a scrollbar gutter — even when the scrollbar is hidden via CSS, leaving
+     * a 1–2 cols gap on the right. We replace it with the same math minus the subtraction so cols
+     * uses the full parent width.
+     */
+    function patchFitAddonNoScrollbarGutter(term, fitAddon) {
+      fitAddon.proposeDimensions = function () {
+        try {
+          if (!term?.element?.parentElement) return undefined;
+          const dims = term._core?._renderService?.dimensions;
+          if (!dims || !dims.css.cell.width || !dims.css.cell.height) return undefined;
+          const ps = window.getComputedStyle(term.element.parentElement);
+          const parentH = parseInt(ps.getPropertyValue('height')) || 0;
+          const parentW = Math.max(0, parseInt(ps.getPropertyValue('width')) || 0);
+          const es = window.getComputedStyle(term.element);
+          const padTop = parseInt(es.getPropertyValue('padding-top')) || 0;
+          const padBot = parseInt(es.getPropertyValue('padding-bottom')) || 0;
+          const padL = parseInt(es.getPropertyValue('padding-left')) || 0;
+          const padR = parseInt(es.getPropertyValue('padding-right')) || 0;
+          const availH = parentH - padTop - padBot;
+          const availW = parentW - padL - padR;
+          return {
+            cols: Math.max(2, Math.floor(availW / dims.css.cell.width)),
+            rows: Math.max(1, Math.floor(availH / dims.css.cell.height))
+          };
+        } catch (_) {
+          return undefined;
+        }
+      };
+    }
+
+    // ---- Safe fit: prevent destructive narrow reflows ----
+    // On mobile (especially iOS PWA), app-switch / keyboard animations can
+    // transiently shrink the container. If fit() runs at that moment, xterm
+    // reflows the entire scrollback to very few columns — irreversible damage.
+    // Guard: check proposeDimensions() BEFORE applying, reject if cols would
+    // drop below an absolute minimum OR below half the last known good width.
+    function safeFit(s) {
+      if (!s || !s.terminal || !s.fitAddon) return false;
+      try {
+        const dims = s.fitAddon.proposeDimensions();
+        if (!dims || dims.cols < MIN_FIT_COLS) return false;
+        // Reject if cols would shrink to less than half the current width
+        // (transient layout glitch during iOS app-switch / keyboard animation)
+        const curCols = s.terminal.cols;
+        if (curCols >= MIN_FIT_COLS && dims.cols < curCols * 0.5) return false;
+        // Mobile: lock COLS only (per-orientation, self-healing grow) so keyboard / address-bar
+        // jitter can't reflow text. ROWS always follows the current proposed value so the cursor
+        // is never clipped when the drawer expands the keyboard panel. Soft keyboard never
+        // changes container height (handleViewportChange translates the app), so this rows-follow
+        // policy doesn't cause keyboard-driven SIGWINCH spam.
+        if (isMobileTouch()) {
+          const lc = getMobileLockedCols();
+          // Grow cols lock when keyboard is down and the container can host more (drawer closed,
+          // window grew, etc.). Lock never shrinks — Re-fit clears it manually.
+          let useCols = lc;
+          if (!isSoftKeyboardLikelyUp() && dims.cols >= MIN_FIT_COLS) {
+            useCols = lc ? Math.max(lc, dims.cols) : dims.cols;
+          }
+          // Rows: always use proposed (clamped) so cursor stays visible regardless of drawer state.
+          const useRows = Math.max(MIN_FIT_ROWS, dims.rows);
+          if (useCols && useCols >= MIN_FIT_COLS) {
+            if (useCols !== lc) setMobileLockedGrid(useCols, useRows); // mirrors rows into storage for UI
+            if (s.terminal.cols !== useCols || s.terminal.rows !== useRows) {
+              try { s.terminal.resize(useCols, useRows); } catch (_) {}
+            }
+            return true;
+          }
+        }
+        s.fitAddon.fit();
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
     // ---- Fit terminal and preserve scroll position ----
     // After fit(), xterm reflows and may reset scroll to top.
     // If user was at bottom (not manually scrolled up), snap back.
@@ -2113,14 +3264,41 @@
       if (!s || !s.terminal || !s.fitAddon) return;
       const shouldSnap = !s._userScrolledUp && !isAlternateScreenTerminal(s.terminal);
       s._suppressScrollTrack = true;
-      s.fitAddon.fit();
+      if (!safeFit(s)) {
+        s._suppressScrollTrack = false;
+        scheduleFitBackoffRetries(s);
+        return;
+      }
+      clearFitBackoffTimers(s);
       if (shouldSnap) {
         s.terminal.scrollToBottom();
       }
+      // Force full repaint — WebGL renderer can leave stale content
+      // after row count changes (e.g. keyboard dismiss on mobile)
       requestAnimationFrame(() => {
+        try {
+          const t = s.terminal;
+          if (typeof t.refresh === 'function') t.refresh(0, t.rows - 1);
+        } catch (_) {}
         if (shouldSnap) s.terminal.scrollToBottom();
+        resizePtyColsIfChanged(s);
         s._suppressScrollTrack = false;
       });
+    }
+
+    /** After open(), WebGL metrics can settle after fonts; re-fit so PTY cols match the real grid. */
+    function scheduleInitialTerminalGeometryFix(s) {
+      if (!s?.terminal || !s.fitAddon) return;
+      // Light fit only — resize is a no-op when the grid is already correct, so when the font
+      // size is persisted and we adopt the server's PTY winsize, opening causes NO visible
+      // reflow. We still fit once on fonts.ready: on a cold load the cell metrics change after
+      // the font applies, so a single corrective fit then is necessary (and only reflows if the
+      // column count actually changed). No font-toggle re-measure on open anymore.
+      const fit = () => { try { fitAndKeepScroll(s); } catch (_) {} };
+      requestAnimationFrame(() => requestAnimationFrame(fit));
+      try {
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit).catch(() => {});
+      } catch (_) {}
     }
 
     // ---- Reflow helper: force xterm to re-render properly ----
@@ -2132,12 +3310,13 @@
       s._suppressScrollTrack = true;
       const origSize = s.terminal.options.fontSize;
       s.terminal.options.fontSize = origSize + 1;
-      s.fitAddon.fit();
+      safeFit(s);
       requestAnimationFrame(() => {
         s.terminal.options.fontSize = origSize;
-        s.fitAddon.fit();
+        safeFit(s);
         if (shouldSnap) s.terminal.scrollToBottom();
         s._suppressScrollTrack = false;
+        resizePtyColsIfChanged(s);
         if (callback) callback();
       });
     }
@@ -2172,14 +3351,18 @@
     // ---- Scroll to bottom (⤓) — light path; reflowTerminal + double snap was janky on busy buffers ----
     document.getElementById('vk-scroll-btn').addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
+      // On iOS, safeFit/scrollToBottom can refocus xterm's hidden textarea
+      // and pop the on-screen keyboard. Remember pre-state and restore.
+      const prevActive = document.activeElement;
+      const wasTextareaFocused = prevActive && prevActive.tagName === 'TEXTAREA';
       if (activeId && sessions[activeId] && sessions[activeId].terminal) {
         const s = sessions[activeId];
         s._userScrolledUp = false;
         if (isAlternateScreenTerminal(s.terminal)) {
-          try { s.fitAddon.fit(); } catch (_) {}
+          safeFit(s);
         } else {
           s._suppressScrollTrack = true;
-          try { s.fitAddon.fit(); } catch (_) {}
+          safeFit(s);
           s.terminal.scrollToBottom();
           requestAnimationFrame(() => {
             try {
@@ -2190,26 +3373,33 @@
             s._suppressScrollTrack = false;
           });
         }
-        s.terminal.focus();
+        // Only re-focus terminal if a textarea was already focused (keyboard up).
+        // Otherwise focusing would pop the on-screen keyboard on iOS.
+        if (wasTextareaFocused) s.terminal.focus();
       }
     });
 
     // ---- iOS touch scroll fix for xterm.js ----
     // xterm.js intercepts touch events for selection, making scroll nearly
-    // impossible on iOS.  We add a custom touchmove handler on the viewport
-    // ---- GPU-accelerated renderer (WebGL → Canvas → DOM fallback) ----
-    // WebGL gives ~900% faster rendering; Canvas is a good middle ground.
-    // Both dramatically improve layout stability during long output (e.g. Claude Code).
+    // impossible on iOS. We add a custom touchmove handler on the viewport (see patchIOSTouchScroll).
+
+    // ---- GPU-accelerated renderer (WebGL2 on desktop; DOM on iOS / fallback) ----
+    // xterm 6 dropped the Canvas addon; use WebGL2 or the built-in DOM renderer.
     function loadBestRenderer(term) {
-      // Try WebGL first (requires WebGL2 context)
-      if (typeof WebglAddon !== 'undefined') {
+      // iOS Safari has a glyph-clipping bug with xterm.js WebGL renderer
+      // (bottom-right of each character gets cut). Skip WebGL on iOS.
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (!isIOS && typeof WebglAddon !== 'undefined') {
         try {
           const webgl = new WebglAddon.WebglAddon();
           webgl.onContextLoss(() => {
-            // If WebGL context is lost, fall back to canvas or DOM
-            console.warn('[renderer] WebGL context lost, disposing');
-            webgl.dispose();
-            loadCanvasRenderer(term);
+            console.warn('[renderer] WebGL context lost, falling back to DOM');
+            try { webgl.dispose(); } catch (_) {}
+            try {
+              const t = term;
+              if (typeof t.refresh === 'function' && t.rows > 0) t.refresh(0, t.rows - 1);
+            } catch (_) {}
           });
           term.loadAddon(webgl);
           console.log('[renderer] WebGL renderer loaded');
@@ -2218,26 +3408,96 @@
           console.warn('[renderer] WebGL not available:', e.message);
         }
       }
-      return loadCanvasRenderer(term);
-    }
-
-    function loadCanvasRenderer(term) {
-      if (typeof CanvasAddon !== 'undefined') {
-        try {
-          const canvas = new CanvasAddon.CanvasAddon();
-          term.loadAddon(canvas);
-          console.log('[renderer] Canvas renderer loaded');
-          return 'canvas';
-        } catch (e) {
-          console.warn('[renderer] Canvas not available:', e.message);
-        }
-      }
-      console.log('[renderer] Using default DOM renderer');
+      console.log('[renderer] Using DOM renderer');
       return 'dom';
     }
 
-    // that calls term.scrollLines() based on finger delta, giving smooth
-    // native-like scrolling on mobile.
+    function findSessionForTerminal(term) {
+      for (const s of Object.values(sessions)) {
+        if (!s || s.type === 'file' || !s.terminal) continue;
+        if (s.terminal === term) return s;
+      }
+      return null;
+    }
+
+    /** 1-based shell cell under (cx,cy); used for tmux mouse wheel SGR payloads (clamp X to PTY cols). */
+    function clientPointToTerminalCell(term, container, cx, cy) {
+      const dispCols = term.cols || 80;
+      const nCols = ptyColsForGrid(dispCols);
+      const nRows = term.rows || 24;
+      const xtermEl = container.querySelector('.xterm');
+      if (!xtermEl) {
+        return { col: Math.max(1, Math.floor(nCols / 2)), row: Math.max(1, Math.floor(nRows / 2)) };
+      }
+      const rect = xtermEl.getBoundingClientRect();
+      const pad = 0;
+      const usableW = Math.max(1, rect.width - 2 * pad);
+      const usableH = Math.max(1, rect.height - 2 * pad);
+      const relX = Math.max(0, cx - rect.left - pad);
+      const relY = Math.max(0, cy - rect.top - pad);
+      const cellW = usableW / dispCols;
+      const cellH = usableH / nRows;
+      let col = Math.floor(relX / cellW) + 1;
+      let row = Math.floor(relY / cellH) + 1;
+      col = Math.max(1, Math.min(nCols, col));
+      row = Math.max(1, Math.min(nRows, row));
+      return { col, row };
+    }
+
+    // Finger travel (in character-cell heights) required per ONE tmux wheel notch. Higher =
+    // slower scrolling. (Each notch itself scrolls a few lines inside tmux's copy-mode.)
+    // Adjustable from the Display modal; persisted in localStorage.
+    const ALT_SCROLL_KEY = 'termhub_alt_scroll_lpn';
+    function readAltScrollLpn() {
+      const v = parseFloat(localStorage.getItem(ALT_SCROLL_KEY));
+      return (Number.isFinite(v) && v >= 0.5 && v <= 8) ? v : 2.5;
+    }
+    let altScrollLinesPerNotch = readAltScrollLpn();
+    function setAltScrollLpn(n) {
+      altScrollLinesPerNotch = Math.max(0.5, Math.min(8, parseFloat(n) || 2.5));
+      try { localStorage.setItem(ALT_SCROLL_KEY, String(altScrollLinesPerNotch)); } catch (_) {}
+    }
+    // Touch-scroll direction inside full-screen apps (tmux/vim). Some prefer the flipped sense.
+    const ALT_SCROLL_INVERT_KEY = 'termhub_alt_scroll_invert';
+    let altScrollInvert = localStorage.getItem(ALT_SCROLL_INVERT_KEY) === '1';
+    function toggleAltScrollInvert() {
+      altScrollInvert = !altScrollInvert;
+      try { localStorage.setItem(ALT_SCROLL_INVERT_KEY, altScrollInvert ? '1' : '0'); } catch (_) {}
+      const btn = document.getElementById('termhub-altscroll-dir');
+      if (btn) btn.textContent = altScrollInvert ? 'Reverse' : 'Normal';
+    }
+    (function initAltScrollUI() {
+      const range = document.getElementById('termhub-altscroll-range');
+      const valEl = document.getElementById('termhub-altscroll-value');
+      if (range && valEl) {
+        range.value = String(altScrollLinesPerNotch);
+        valEl.textContent = String(altScrollLinesPerNotch);
+        range.addEventListener('input', () => { valEl.textContent = range.value; });
+        range.addEventListener('change', () => { setAltScrollLpn(range.value); });
+      }
+      const dirBtn = document.getElementById('termhub-altscroll-dir');
+      if (dirBtn) dirBtn.textContent = altScrollInvert ? 'Reverse' : 'Normal';
+    })();
+
+    /**
+     * iOS WebKit ignores synthetic WheelEvent for programs using the alternate screen (tmux, etc.).
+     * Send N xterm SGR-extended wheel codes (buttons 64=up / 65=down), which tmux handles when mouse
+     * mode is on. Callers decide N via a finger-travel accumulator so speed is frame-rate-independent.
+     */
+    function sendWheelNotches(term, container, up, count, cx, cy) {
+      if (count < 1) return false;
+      const s = findSessionForTerminal(term);
+      if (!s?.ws || s.ws.readyState !== WebSocket.OPEN) return false;
+      const { col, row } = clientPointToTerminalCell(term, container, cx, cy);
+      const btn = up ? 64 : 65;
+      let payload = '';
+      for (let i = 0; i < Math.min(count, 24); i++) payload += `\x1b[<${btn};${col};${row}M`;
+      try { s.ws.send(JSON.stringify({ type: 'input', data: payload })); } catch (_) { return false; }
+      return true;
+    }
+
+    // Calls term.scrollLines() based on finger delta, giving smooth
+    // native-like scrolling on mobile with inertia.
     function patchIOSTouchScroll(term, container) {
       const viewport = container.querySelector('.xterm-viewport');
       if (!viewport) return;
@@ -2252,6 +3512,9 @@
       let velocityY = 0;       // px/ms
       let scrolling = false;
       let inertiaRAF = 0;
+      let wheelTouchCx = 0;
+      let wheelTouchCy = 0;
+      let wheelAccum = 0;        // accumulated finger px → drained into wheel notches (alt screen)
 
       container.addEventListener('touchstart', (e) => {
         if (e.touches.length === 1) {
@@ -2259,9 +3522,12 @@
           if (inertiaRAF) { cancelAnimationFrame(inertiaRAF); inertiaRAF = 0; }
           touchStartY = e.touches[0].clientY;
           lastY = touchStartY;
+          wheelTouchCx = e.touches[0].clientX;
+          wheelTouchCy = e.touches[0].clientY;
           lastTime = Date.now();
           velocityY = 0;
           scrolling = false;
+          wheelAccum = 0;
         }
       }, { passive: true });
 
@@ -2269,6 +3535,10 @@
         if (e.touches.length !== 1) return;
 
         const currentY = e.touches[0].clientY;
+        const cx = e.touches[0].clientX;
+        const cy = e.touches[0].clientY;
+        wheelTouchCx = cx;
+        wheelTouchCy = cy;
         const now = Date.now();
         const deltaFromStart = Math.abs(currentY - touchStartY);
         const deltaFromLast = lastY - currentY;
@@ -2284,8 +3554,25 @@
           const instantV = deltaFromLast / dt;
           velocityY = velocityY * 0.4 + instantV * 0.6;
 
-          // Convert pixel delta to lines (roughly fontSize * 1.2 per line)
           const lineHeight = (term.options.fontSize || 13) * 1.2;
+          /* Alternate buffer: bypass xterm viewport + fake wheel (broken on Safari); PTY sees real mouse escapes. */
+          if (isAlternateScreenTerminal(term)) {
+            // Accumulate finger travel and emit ONE wheel notch per ALT_SCROLL_LINES_PER_NOTCH
+            // line-heights — decoupled from the (high) touchmove rate, so it isn't too fast.
+            wheelAccum += deltaFromLast;
+            const notchPx = lineHeight * altScrollLinesPerNotch;
+            let notches = Math.trunc(Math.abs(wheelAccum) / notchPx);
+            if (notches > 0) {
+              const up = (wheelAccum > 0) !== altScrollInvert;
+              sendWheelNotches(term, container, up, notches, cx, cy);
+              wheelAccum -= (wheelAccum > 0 ? 1 : -1) * notches * notchPx;
+            }
+            lastY = currentY;
+            lastTime = now;
+            e.preventDefault();
+            return;
+          }
+
           const lines = Math.round(deltaFromLast / lineHeight);
           if (lines !== 0) {
             term.scrollLines(lines);
@@ -2310,12 +3597,26 @@
         function inertiaStep(now) {
           const frameDt = now - lastFrame;
           lastFrame = now;
-          v *= Math.pow(friction, frameDt / 16);  // frame-rate independent damping
+          // Friction increases as velocity drops — snappy stop at low speed
+          const absV = Math.abs(v);
+          const f = absV > 0.3 ? friction : absV > 0.1 ? 0.3 : 0.7;
+          v *= Math.pow(f, frameDt / 16);  // frame-rate independent damping
           if (Math.abs(v) < 0.005) { inertiaRAF = 0; return; }
           residual += v * frameDt;
           const lines = Math.trunc(residual / lineHeight);
           if (lines !== 0) {
-            term.scrollLines(lines);
+            if (isAlternateScreenTerminal(term)) {
+              wheelAccum += lines * lineHeight;
+              const notchPx = lineHeight * altScrollLinesPerNotch;
+              const notches = Math.trunc(Math.abs(wheelAccum) / notchPx);
+              if (notches > 0) {
+                const up = (wheelAccum > 0) !== altScrollInvert;
+                sendWheelNotches(term, container, up, notches, wheelTouchCx, wheelTouchCy);
+                wheelAccum -= (wheelAccum > 0 ? 1 : -1) * notches * notchPx;
+              }
+            } else {
+              term.scrollLines(lines);
+            }
             residual -= lines * lineHeight;
           }
           inertiaRAF = requestAnimationFrame(inertiaStep);
@@ -2326,29 +3627,78 @@
 
     // ---- Terminal management ----
 
-    async function createTerminal(shell, cwd) {
+    /** Fit a throwaway xterm in a ghost box sized like #terminal-area so PTY spawns at real cols × rows before WebSocket connects. */
+    function probeTerminalGridDimensions() {
+      const area = document.getElementById('terminal-area');
+      const w = Math.max(1, Math.floor(area.clientWidth || 640));
+      const h = Math.max(1, Math.floor(area.clientHeight || 480));
+      const ghost = document.createElement('div');
+      ghost.setAttribute('aria-hidden', 'true');
+      ghost.style.cssText =
+        `position:fixed;left:-10000px;top:0;width:${w}px;height:${h}px;overflow:hidden;visibility:hidden;pointer-events:none`;
+      document.body.appendChild(ghost);
+      const padBox = document.createElement('div');
+      padBox.style.cssText = 'box-sizing:border-box;width:100%;height:100%;padding:0';
+      ghost.appendChild(padBox);
+      let term = null;
+      try {
+        term = new Terminal({
+          cursorBlink: false,
+          fontSize: ZOOM_LEVELS[zoomIndex],
+          fontFamily: TERMINAL_FONT_FAMILY,
+          letterSpacing: 0,
+          scrollback: 1,
+          allowProposedApi: true
+        });
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        patchFitAddonNoScrollbarGutter(term, fitAddon);
+        term.open(padBox);
+        loadBestRenderer(term);
+        fitAddon.fit();
+        let cols = term.cols;
+        let rows = term.rows;
+        if (!Number.isFinite(cols) || cols < MIN_FIT_COLS) cols = 80;
+        if (!Number.isFinite(rows) || rows < 2) rows = 24;
+        return { cols: ptyColsForGrid(cols), rows };
+      } finally {
+        try {
+          if (term) term.dispose();
+        } catch (_) {}
+        ghost.remove();
+      }
+    }
+
+    async function createTerminal(shell, cwd, opts) {
+      opts = opts || {};
       if (!shell) shell = defaultShell;
       showToast('Starting terminal...', 'info');
 
-      const body = { shell, cols: 80, rows: 24 };
+      const dims = probeTerminalGridDimensions();
+      const body = { shell, cols: dims.cols, rows: dims.rows };
       if (cwd) body.cwd = cwd;
+      if (opts.tmuxSession) body.tmuxSession = opts.tmuxSession;
 
       try {
-        const resp = await authFetch('/api/terminal/new', {
+        const data = await authFetchJson('/api/terminal/new', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         });
-        const data = await resp.json();
-        if (data.error) throw new Error(data.error);
-
         const id = data.id;
 
-        // Build tab label — append last dir segment if custom cwd
-        let tabLabel = `${getShellName(shell)} #${id}`;
-        if (cwd) {
-          const lastSeg = cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
-          if (lastSeg) tabLabel += ` \u00B7 ${lastSeg}`;
+        let tabLabel;
+        let tabIconStr;
+        if (opts.tmuxSession) {
+          tabIconStr = '\u229E';
+          tabLabel = `tmux ${opts.tmuxSession} #${id}`;
+        } else {
+          tabLabel = `${getShellName(shell)} #${id}`;
+          if (cwd) {
+            const lastSeg = cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+            if (lastSeg) tabLabel += ` \u00B7 ${lastSeg}`;
+          }
+          tabIconStr = getShellIcon(shell);
         }
 
         // Create tab
@@ -2356,7 +3706,7 @@
         tabEl.className = 'tab';
         tabEl.dataset.id = id;
         tabEl.innerHTML = `
-          <span class="tab-icon">${getShellIcon(shell)}</span>
+          <span class="tab-icon">${tabIconStr}</span>
           <span class="tab-label">${tabLabel}</span>
           <button class="tab-close" title="Close">&times;</button>
         `;
@@ -2379,7 +3729,8 @@
         const term = new Terminal({
           cursorBlink: true,
           fontSize: ZOOM_LEVELS[zoomIndex],
-          fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
+          fontFamily: TERMINAL_FONT_FAMILY,
+          letterSpacing: 0,
           theme: TERMINAL_THEME,
           allowProposedApi: true,
           scrollback: getScrollbackLines(),
@@ -2389,12 +3740,16 @@
 
         const fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
-        try {
-          const webLinksAddon = new WebLinksAddon.WebLinksAddon();
-          term.loadAddon(webLinksAddon);
-        } catch(e) {}
+        patchFitAddonNoScrollbarGutter(term, fitAddon);
 
         term.open(container);
+        try {
+          if (typeof WebLinksAddon !== 'undefined') {
+            term.loadAddon(new WebLinksAddon.WebLinksAddon((_event, uri) => {
+              window.open(uri, '_blank', 'noopener,noreferrer');
+            }));
+          }
+        } catch (e) {}
         const renderer = loadBestRenderer(term);
         fitAddon.fit();
         patchIOSTouchScroll(term, container);
@@ -2403,21 +3758,19 @@
         initScrollTracking(sessions[id]);
         tabEl.classList.add('tab-disconnected');
         container.classList.add('terminal-disconnected');
+        attachTerminalResizeObserver(sessions[id]);
+        scheduleInitialTerminalGeometryFix(sessions[id]);
         connectWs(id);
 
         term.onData((data) => {
           const s = sessions[id];
           if (s && s.ws && s.ws.readyState === WebSocket.OPEN) {
+            flushPendingWrite(s);
             s.ws.send(JSON.stringify({ type: 'input', data }));
           }
         });
 
-        term.onResize(({ cols, rows }) => {
-          const s = sessions[id];
-          if (s && s.ws && s.ws.readyState === WebSocket.OPEN) {
-            s.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-          }
-        });
+        term.onResize(() => resizePtyColsIfChanged(sessions[id]));
         document.getElementById('welcome').style.display = 'none';
         switchTab(id);
         updateCount();
@@ -2427,61 +3780,7 @@
       }
     }
 
-    // ---- Link detection from terminal output ----
-    const FILE_PATH_REGEX = /(?:[A-Za-z]:[\\\/]|\/(?!\/)|~\/|\.\/|\.\.\/)[^\s:,"'`()\[\]{}|<>]+\.\w+(?::\d+(?::\d+)?)?/g;
-    const URL_REGEX = /https?:\/\/[^\s"'`<>()[\]{}]+/gi;
     let nextFileViewerId = 10000;
-
-    // Captured links: { text, type: 'url'|'file', timestamp }
-    const capturedLinks = [];
-    const MAX_CAPTURED_LINKS = 100;
-    const capturedLinksSet = new Set(); // deduplicate by text
-
-    // Strip ANSI escape codes from terminal output before scanning
-    function stripAnsi(str) {
-      return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
-                .replace(/\x1b\][^\x07]*\x07/g, '')
-                .replace(/\x1b[()][AB012]/g, '')
-                .replace(/\x1b[\x20-\x2F][\x30-\x7E]/g, '');
-    }
-
-    function scanOutputForLinks(rawData) {
-      const data = stripAnsi(rawData);
-      let found = false;
-
-      // Scan for URLs
-      URL_REGEX.lastIndex = 0;
-      let match;
-      while ((match = URL_REGEX.exec(data)) !== null) {
-        let url = match[0];
-        // Trim trailing punctuation that's likely not part of URL
-        url = url.replace(/[.,;:!?)]+$/, '');
-        if (!capturedLinksSet.has(url)) {
-          capturedLinksSet.add(url);
-          capturedLinks.unshift({ text: url, type: 'url', timestamp: Date.now() });
-          found = true;
-        }
-      }
-
-      // Scan for file paths
-      FILE_PATH_REGEX.lastIndex = 0;
-      while ((match = FILE_PATH_REGEX.exec(data)) !== null) {
-        const fp = match[0];
-        if (!capturedLinksSet.has(fp)) {
-          capturedLinksSet.add(fp);
-          capturedLinks.unshift({ text: fp, type: 'file', timestamp: Date.now() });
-          found = true;
-        }
-      }
-
-      // Trim to max
-      while (capturedLinks.length > MAX_CAPTURED_LINKS) {
-        const removed = capturedLinks.pop();
-        capturedLinksSet.delete(removed.text);
-      }
-
-      if (found) renderLinksPanel();
-    }
 
     async function openFileInViewer(rawPath) {
       // Strip line:col suffix
@@ -2513,11 +3812,40 @@
           return;
         }
 
-        // Check if file is already open — switch to existing tab
+        // Check if file is already open — refresh content and switch to tab
         for (const [existingId, s] of Object.entries(sessions)) {
           if (s.type === 'file' && s.filePath === data.path) {
+            // Rebuild content table with fresh data
+            const contentArea = s.container.querySelector('.file-viewer-content');
+            if (contentArea) {
+              const lines = data.content.split('\n');
+              const table = document.createElement('table');
+              table.className = 'file-viewer-table';
+              for (let i = 0; i < lines.length; i++) {
+                const tr = document.createElement('tr');
+                if (lineNumber && i + 1 === lineNumber) tr.className = 'file-viewer-highlight-line';
+                const tdNum = document.createElement('td');
+                tdNum.className = 'file-line-num';
+                tdNum.textContent = i + 1;
+                const tdCode = document.createElement('td');
+                tdCode.className = 'file-line-code';
+                tdCode.textContent = lines[i];
+                tr.appendChild(tdNum);
+                tr.appendChild(tdCode);
+                table.appendChild(tr);
+              }
+              contentArea.innerHTML = '';
+              contentArea.appendChild(table);
+            }
+            // Update meta in header
+            const metaEl = s.container.querySelector('.file-viewer-meta');
+            if (metaEl) metaEl.textContent = `${formatFileSize(data.size)} \u00b7 ${data.extension || 'text'}`;
             switchTab(parseInt(existingId) || existingId);
-            showToast(`Already open: ${data.name}`, 'info');
+            showToast(`Refreshed: ${data.name}`, 'info');
+            if (lineNumber) {
+              const highlightRow = s.container.querySelector('.file-viewer-highlight-line');
+              if (highlightRow) setTimeout(() => highlightRow.scrollIntoView({ block: 'center' }), 100);
+            }
             return;
           }
         }
@@ -2628,6 +3956,7 @@
         sessions[id].tab.classList.add('active');
         sessions[id].container.style.display = 'block';
         activeId = id;
+        updateHistorySizeIndicator();
         setTimeout(() => {
           if (sessions[id] && sessions[id].terminal) {
             fitAndKeepScroll(sessions[id]);
@@ -2637,31 +3966,9 @@
       }
     }
 
-    // ---- Tab swipe gestures ----
-    (function setupTabSwipe() {
-      const area = document.getElementById('terminal-area');
-      let startX = 0, startY = 0;
-      area.addEventListener('touchstart', (e) => {
-        if (e.touches.length !== 1) return;
-        startX = e.touches[0].clientX;
-        startY = e.touches[0].clientY;
-      }, { passive: true });
-      area.addEventListener('touchend', (e) => {
-        if (e.changedTouches.length !== 1) return;
-        const dx = e.changedTouches[0].clientX - startX;
-        const dy = e.changedTouches[0].clientY - startY;
-        // Threshold: 80px horizontal, must be 2x vertical component
-        if (Math.abs(dx) < 80 || Math.abs(dx) < Math.abs(dy) * 2) return;
-        const ids = Object.keys(sessions);
-        if (ids.length < 2) return;
-        const curIdx = ids.indexOf(String(activeId));
-        if (curIdx < 0) return;
-        const nextIdx = dx < 0 ? curIdx + 1 : curIdx - 1;
-        if (nextIdx >= 0 && nextIdx < ids.length) {
-          switchTab(parseInt(ids[nextIdx]) || ids[nextIdx]);
-        }
-      }, { passive: true });
-    })();
+    // ---- Tab swipe gestures (disabled) ----
+    // Edge swipe to change tab was too easy to trigger accidentally
+    // (and conflicts with iOS Safari's back-swipe). Left disabled.
 
     async function closeTerminal(id) {
       haptic(20);
@@ -2672,6 +3979,10 @@
       }
 
       if (sessions[id]) {
+        const sess = sessions[id];
+        clearFitBackoffTimers(sess);
+        if (sess._vvFitFollowTmo) clearTimeout(sess._vvFitFollowTmo);
+        detachTerminalResizeObserver(sess);
         // Clear any pending reconnect timer and overlay
         if (sessions[id]._reconnectTimer) clearTimeout(sessions[id]._reconnectTimer);
         if (sessions[id]._countdownInterval) clearInterval(sessions[id]._countdownInterval);
@@ -2763,8 +4074,10 @@
     // ---- Reconnect to existing terminals on page load ----
     async function reconnectExisting() {
       try {
+        diag('reconnectExisting: GET /api/terminals');
         const resp = await authFetch('/api/terminals');
         const list = await resp.json();
+        diag(`/api/terminals → ${resp.status}, terminals=${list.length}`);
 
         if (list.length === 0) return;
 
@@ -2807,7 +4120,8 @@
       const term = new Terminal({
         cursorBlink: true,
         fontSize: ZOOM_LEVELS[zoomIndex],
-        fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
+        fontFamily: TERMINAL_FONT_FAMILY,
+        letterSpacing: 0,
         theme: TERMINAL_THEME,
         allowProposedApi: true,
         scrollback: getScrollbackLines(),
@@ -2817,12 +4131,16 @@
 
       const fitAddon = new FitAddon.FitAddon();
       term.loadAddon(fitAddon);
-      try {
-        const webLinksAddon = new WebLinksAddon.WebLinksAddon();
-        term.loadAddon(webLinksAddon);
-      } catch(e) {}
+      patchFitAddonNoScrollbarGutter(term, fitAddon);
 
       term.open(container);
+      try {
+        if (typeof WebLinksAddon !== 'undefined') {
+          term.loadAddon(new WebLinksAddon.WebLinksAddon((_event, uri) => {
+            window.open(uri, '_blank', 'noopener,noreferrer');
+          }));
+        }
+      } catch (e) {}
       const renderer = loadBestRenderer(term);
       fitAddon.fit();
       patchIOSTouchScroll(term, container);
@@ -2831,21 +4149,20 @@
       initScrollTracking(sessions[id]);
       tabEl.classList.add('tab-disconnected');
       container.classList.add('terminal-disconnected');
+      attachTerminalResizeObserver(sessions[id]);
+      scheduleInitialTerminalGeometryFix(sessions[id]);
       connectWs(id);
 
       term.onData((data) => {
         const s = sessions[id];
         if (s && s.ws && s.ws.readyState === WebSocket.OPEN) {
+          // Flush any throttled PTY output so local echo of this keystroke is visible immediately.
+          flushPendingWrite(s);
           s.ws.send(JSON.stringify({ type: 'input', data }));
         }
       });
 
-      term.onResize(({ cols, rows }) => {
-        const s = sessions[id];
-        if (s && s.ws && s.ws.readyState === WebSocket.OPEN) {
-          s.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-        }
-      });
+      term.onResize(() => resizePtyColsIfChanged(sessions[id]));
       switchTab(id);
     }
 
@@ -2853,6 +4170,7 @@
     function connectWs(id) {
       const s = sessions[id];
       if (!s || s.type === 'file') return;
+      s.id = id;
 
       // Close old socket if any
       if (s.ws) {
@@ -2860,22 +4178,24 @@
       }
 
       const token = getToken();
-      const ws = new WebSocket(`${getWsUrl()}?id=${id}&token=${token}`);
+      diag(`WS connecting id=${id} token=${token ? token.slice(0, 6) + '…' : 'NONE'} master=${document.cookie.includes('master_token=') ? 'yes' : 'no'}`);
+      // Initial scrollback tail size is chosen by the FRONTEND and sent to the server, so it
+      // can be tuned here without a server change. Server clamps it to a safe range.
+      const ws = new WebSocket(`${getWsUrl()}?id=${id}&token=${token}&tail=${INITIAL_TAIL_BYTES}`);
       s.ws = ws;
+      s._ptyGeomSig = null;
       s._kicked = false;
+      s._diagFirstOut = false;
 
       ws.onopen = () => {
+        diag(`WS OPEN id=${id}`);
         s.tab.classList.remove('tab-disconnected');
         s.container.classList.remove('terminal-disconnected');
         hideReconnectOverlay(id);
         // On reconnect: clear terminal so buffered replay doesn't double up
         s.terminal.clear();
-        // Re-fit and send correct dimensions
-        try { s.fitAddon.fit(); } catch(_) {}
-        const dims = s.fitAddon.proposeDimensions();
-        if (dims) {
-          ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
-        }
+        // Re-fit and sync PTY (fitAndKeepScroll → resize via rAF; deduped resizePtyColsIfChanged)
+        fitAndKeepScroll(s);
         // Mark as reconnecting — next data batch is the buffer replay
         s._reconnecting = true;
       };
@@ -2884,31 +4204,79 @@
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
-            s.terminal.write(msg.data);
-            scanOutputForLinks(msg.data);
-            // After reconnect buffer replay — avoid heavy reflowTerminal (see afterReconnectReplay)
-            if (s._reconnecting) {
-              s._reconnecting = false;
-              setTimeout(() => {
-                try {
-                  afterReconnectReplay(s);
-                } catch (_) {}
-              }, 150);
+            if (!s._diagFirstOut) { s._diagFirstOut = true; diag(`WS first-output id=${id} bytes=${(msg.data || '').length}`); }
+            throttledWrite(s, msg.data);
+            // Track live output in client-side history so re-render on backfill stays consistent.
+            if (typeof s._history === 'string') {
+              s._history += msg.data;
+              const CLIENT_HISTORY_CAP = 20 * 1024 * 1024;
+              if (s._history.length > CLIENT_HISTORY_CAP) {
+                const trim = s._history.length - CLIENT_HISTORY_CAP;
+                s._history = s._history.slice(trim);
+                // We can't recompute oldestLoadedLine precisely after byte-trim; mark as "best effort".
+                s._oldestLoadedLine = s._firstLineIndex; // gap may now exist on server side; clamp.
+              }
+              if (s.id === activeId) updateHistorySizeIndicator();
             }
+          } else if (msg.type === 'history') {
+            diag(`WS history id=${id} bytes=${(msg.data || '').length}`);
+            // Write the raw stream verbatim — a TUI's screen is reconstructed by replaying its
+            // exact bytes (cursor moves, \r, blank lines included). Do NOT alter it.
+            const _d = msg.data || '';
+            s._history = _d;
+            s._firstLineIndex = msg.firstLineIndex || 0;
+            s._oldestLoadedLine = msg.startLine || 0;
+            s._endLine = msg.endLine || 0;
+            // Adopt the PTY's existing winsize so the replayed scrollback is wrapped at the same
+            // width it was produced at, instead of our own (possibly not-yet-stable) fit. The
+            // initial-geometry re-measure converges this to the real viewport shortly after.
+            if (msg.cols && msg.rows && (s.terminal.cols !== msg.cols || s.terminal.rows !== msg.rows)) {
+              try { s.terminal.resize(msg.cols, msg.rows); } catch (_) {}
+            }
+            // After any history payload (initial load / reconnect / mobile resume),
+            // require a fresh user gesture before the load-older confirm can fire again.
+            s._userGestureSinceReset = false;
+            s._historyPromptPending = false;
+            // Write the history, then repaint+snap ONLY after xterm finishes parsing it
+            // (via the write callback). A fixed timer raced the async parse, leaving the
+            // screen intermittently blank until a manual reflow — drive it off completion.
+            flushPendingWrite(s); // drain any throttle buffer from earlier output
+            const wasReconnecting = s._reconnecting;
+            s._reconnecting = false;
+            // Alt-screen sessions aren't cached, so the history carries no ?1049h and tmux's
+            // SIGWINCH redraw won't re-send it — the fresh xterm would stay on the NORMAL buffer
+            // (so touch-scroll wouldn't forward to tmux). Switch xterm into the alternate buffer
+            // ourselves to match the server/app state, then the redraw paints into it.
+            const writeData = (msg.altScreen ? '\x1b[?1049h' : '') + _d;
+            s.terminal.write(writeData, () => {
+              if (s.id === activeId) updateHistorySizeIndicator();
+              try {
+                if (wasReconnecting) afterReconnectReplay(s); // fit + full refresh + snap
+                else snapToBottom(s);
+                // Alternate screen (tmux/vim/…): the scrollback wasn't cached, so the replayed
+                // history is only the pre-alt content. Nudge the PTY (SIGWINCH) so the app
+                // repaints its CURRENT screen — we rely entirely on the app's own redraw.
+                if (msg.altScreen) forcePtyRepaint(s);
+              } catch (_) {}
+            });
           } else if (msg.type === 'exit') {
-            s.terminal.write(`\r\n\x1b[31m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
+            flushPendingWrite(s);
+            scrollAwareWrite(s, `\r\n\x1b[31m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
           } else if (msg.type === 'error') {
-            s.terminal.write(`\r\n\x1b[31m[Error: ${msg.message}]\x1b[0m\r\n`);
+            diag(`WS server-error id=${id}: ${msg.message}`);
+            flushPendingWrite(s);
+            scrollAwareWrite(s, `\r\n\x1b[31m[Error: ${msg.message}]\x1b[0m\r\n`);
           } else if (msg.type === 'kicked') {
             s._kicked = true;
             handleKicked(msg.message);
           }
         } catch (err) {
-          s.terminal.write(event.data);
+          scrollAwareWrite(s, event.data);
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
+        diag(`WS CLOSE id=${id} code=${ev.code}${s._kicked ? ' (kicked)' : s._closing ? ' (intentional)' : ' → retry in 3s'}`);
         if (s._kicked || s._closing) return; // don't reconnect if kicked or intentionally closed
         if (s.ws !== ws) return; // replaced by a newer socket (reconnect race)
         s.tab.classList.add('tab-disconnected');
@@ -2922,7 +4290,7 @@
         }, 3000);
       };
 
-      ws.onerror = () => {};
+      ws.onerror = () => { diag(`WS ERROR id=${id}`); };
     }
 
     // ---- Reconnect overlay (per-terminal) ----
@@ -3001,9 +4369,21 @@
       }
     }
 
+    // ---- bfcache restore: also disarm load-older confirm ----
+    window.addEventListener('pageshow', (e) => {
+      for (const s of Object.values(sessions)) {
+        if (s && s.terminal) { s._userGestureSinceReset = false; s._historyPromptPending = false; }
+      }
+    });
+
     // ---- Visibility change: reconnect when app comes back to foreground ----
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
+        // Disarm load-older confirm across all sessions — Safari can restore from bfcache
+        // and fire scroll events before any new user gesture.
+        for (const s of Object.values(sessions)) {
+          if (s && s.terminal) { s._userGestureSinceReset = false; s._historyPromptPending = false; }
+        }
         // Small delay to let network recover
         setTimeout(() => {
           let anyDead = false;
@@ -3015,13 +4395,22 @@
             }
           }
           if (!anyDead) hideReconnectBanner();
-          // Light refit only. Heavy reflowTerminal() (font toggle + 2× fit) was resetting
-          // scroll to top then stepping to bottom — very slow with large scrollback on mobile.
-          // Heavy reflow (⤓) only if needed; reconnect uses light afterReconnectReplay.
+          // Light refit — fitAndKeepScroll guards against too-narrow container
           if (activeId && sessions[activeId] && sessions[activeId].terminal) {
             fitAndKeepScroll(sessions[activeId]);
           }
         }, 500);
+        // On iOS, visualViewport dimensions may not be fully restored after 500ms.
+        // Schedule additional refit attempts to catch late layout updates.
+        for (const delay of [1000, 2000]) {
+          setTimeout(() => {
+            if (document.visibilityState !== 'visible') return;
+            if (activeId && sessions[activeId] && sessions[activeId].terminal) {
+              if (window.visualViewport) handleViewportChange();
+              fitAndKeepScroll(sessions[activeId]);
+            }
+          }, delay);
+        }
       }
     });
 
@@ -3044,79 +4433,107 @@
       window.location.href = '/welcome';
     });
 
-    // ---- Mobile: #app vs system keyboard (visualViewport) ----
-    // The OS resizes or shifts the layout when the IME opens. We also size #app from
-    // visualViewport — that is correct, but (1) window "resize" often fires in the same
-    // frame and used to call fit() separately, stacking with this path; (2) height must
-    // stay within layout viewport bounds or you get an extra blank band ("double" inset).
-    // interactive-widget=resizes-content (viewport meta) aligns Chrome with a resized layout.
-    let _vvLastTop = null;
-    let _vvLastHeight = null;
-    let _vvFitTimer = null;
+    // ---- Mobile keyboard: resize app + refit rows only ----
+    // Shrink #app to the visible area above the keyboard, then refit the
+    // terminal.  Since the WIDTH doesn't change, fit() only adjusts rows —
+    // no column change → no text re-wrapping → no content loss.
+    // The safeFit() guard rejects any fit that would shrink cols by >50%,
+    // so transient narrow layouts are still blocked.
 
-    function scheduleViewportFit() {
-      if (!(activeId && sessions[activeId])) return;
-      if (_vvFitTimer) clearTimeout(_vvFitTimer);
-      _vvFitTimer = setTimeout(() => {
-        _vvFitTimer = null;
-        fitAndKeepScroll(sessions[activeId]);
-      }, 80);
+    let _vvLastH = null;
+
+    // Height the function drawer (expanded keypad) currently occupies, on mobile only. Used to
+    // translate the view up instead of shrinking the terminal — so opening it causes NO reflow.
+    function drawerOpenHeight() {
+      if (!isMobileTouch()) return 0;
+      const d = document.getElementById('vk-expanded');
+      if (!d || d.classList.contains('hidden')) return 0;
+      const cs = getComputedStyle(d);
+      // Include margins so #app is grown by the drawer's FULL footprint — otherwise the terminal
+      // area is off by a couple px (sub-row), which used to trip a re-fit.
+      return (d.offsetHeight || 0) + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
     }
 
-    function handleViewportResize() {
+    function handleViewportChange() {
       const vv = window.visualViewport;
       if (!vv) return;
 
-      const top = Math.round(vv.offsetTop);
-      const h = Math.round(vv.height);
-      if (_vvLastTop === top && _vvLastHeight === h) return;
-      _vvLastTop = top;
-      _vvLastHeight = h;
-
       const app = document.getElementById('app');
-      const innerH = typeof window.innerHeight === 'number' ? window.innerHeight : h;
-      const maxH = Math.max(0, innerH - top);
-      const clampedH = Math.min(h, maxH);
+      const fullH = window.innerHeight;
+      const visibleH = Math.round(vv.height);
+      const kbHeight = fullH - visibleH - Math.round(vv.offsetTop);
 
+      // Locked-grid mode (mobile, dims already captured): keep #app at full size, translate up so
+      // the bottom of the grid sits just above the soft keyboard. PTY dims never change → no SIGWINCH.
+      // The function drawer is folded into the same translate (keypad behaves like the keyboard):
+      // make #app taller by the drawer height so the terminal area keeps its rows, then shift up.
+      if (isMobileTouch() && getMobileLockedCols()) {
+        const dH = drawerOpenHeight();
+        const up = (kbHeight > 80 ? kbHeight : 0) + dH;
+        app.style.top = '0px';
+        app.style.height = (fullH + dH) + 'px';
+        app.style.transform = up > 0 ? `translateY(${-up}px)` : '';
+        return;
+      }
+
+      // Pre-lock / desktop path: shrink container to visible area and refit (rows-only typically).
+      app.style.transform = '';
+      const h = kbHeight > 80 ? visibleH : fullH;
       app.style.top = vv.offsetTop + 'px';
-      app.style.height = clampedH + 'px';
+      app.style.height = h + 'px';
 
-      scheduleViewportFit();
-    }
-
-    function invalidateViewportMetrics() {
-      _vvLastTop = null;
-      _vvLastHeight = null;
+      // Only refit when height actually changed
+      if (_vvLastH !== h) {
+        _vvLastH = h;
+        if (activeId && sessions[activeId]) {
+          const sess = sessions[activeId];
+          fitAndKeepScroll(sess);
+          // iOS keyboard: first frame can still lie about container width cols; settle then refit.
+          if (navigator.maxTouchPoints > 0) {
+            if (sess._vvFitFollowTmo) clearTimeout(sess._vvFitFollowTmo);
+            sess._vvFitFollowTmo = setTimeout(() => {
+              sess._vvFitFollowTmo = null;
+              if (sessions[activeId] !== sess) return;
+              fitAndKeepScroll(sess);
+            }, 130);
+          }
+        }
+      }
     }
 
     if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', handleViewportResize);
-      // scroll: URL bar / rubber-band; only runs fit when top/height actually change (rounded)
-      window.visualViewport.addEventListener('scroll', handleViewportResize);
-      handleViewportResize();
+      window.visualViewport.addEventListener('resize', handleViewportChange);
+      window.visualViewport.addEventListener('scroll', handleViewportChange);
+      handleViewportChange();
     }
 
     window.addEventListener('resize', () => {
       if (window.visualViewport) {
-        invalidateViewportMetrics();
-        requestAnimationFrame(handleViewportResize);
+        _vvLastH = null; // force re-evaluation
+        requestAnimationFrame(handleViewportChange);
       } else if (activeId && sessions[activeId]) {
         fitAndKeepScroll(sessions[activeId]);
       }
     });
 
     window.addEventListener('orientationchange', () => {
-      invalidateViewportMetrics();
+      _vvLastH = null;
       setTimeout(() => {
-        if (window.visualViewport) handleViewportResize();
+        if (window.visualViewport) handleViewportChange();
         else if (activeId && sessions[activeId]) fitAndKeepScroll(sessions[activeId]);
       }, 200);
     });
 
     // Auto-reconnect on page load
+    diag('page init (DOM ready, starting auto-reconnect)');
     loadGroupInfo();
     fetchPlatform();
     reconnectExisting();
+
+    // Register service worker for PWA installability
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
   </script>
 </body>
 </html>

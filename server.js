@@ -5,19 +5,31 @@ const pty = require('node-pty');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
+const { spawnSync } = require('child_process');
+const { createLineBuffer } = require('./lib/lineBuffer');
+
 
 // ========== Logging System ==========
 const LOG_DIR = path.join(__dirname, 'logs');
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
+let _lastLogDate = '';
 function getLogFileName() {
   const d = new Date();
-  return `hub-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}.log`;
+  const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  if (dateStr !== _lastLogDate) {
+    _lastLogDate = dateStr;
+    _logSizeExceeded = false; // reset cap on new day
+  }
+  return `hub-${dateStr}.log`;
 }
 
 function timestamp() {
   return new Date().toISOString();
 }
+
+const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB per log file
+let _logSizeExceeded = false;
 
 function writeLog(level, category, message, extra) {
   const ts = timestamp();
@@ -25,18 +37,24 @@ function writeLog(level, category, message, extra) {
     ? `[${ts}] [${level}] [${category}] ${message} | ${JSON.stringify(extra)}`
     : `[${ts}] [${level}] [${category}] ${message}`;
 
-  // Console output (wrapped to prevent EPIPE crash)
+  // Console output — only errors/warnings/fatal + startup messages
   try {
-    if (level === 'ERROR' || level === 'FATAL') {
-      process.stderr.write(line + '\n');
-    } else {
-      process.stdout.write(line + '\n');
+    if (level === 'ERROR' || level === 'FATAL' || level === 'WARN' || category === 'server' || category === 'auth') {
+      const stream = (level === 'ERROR' || level === 'FATAL') ? process.stderr : process.stdout;
+      stream.write(line + '\n');
     }
   } catch (_) {}
 
-  // File output
+  // File output (skip if log file already exceeded size cap, except errors)
   try {
-    fs.appendFileSync(path.join(LOG_DIR, getLogFileName()), line + '\n');
+    const logPath = path.join(LOG_DIR, getLogFileName());
+    if (_logSizeExceeded && level !== 'ERROR' && level !== 'FATAL' && level !== 'WARN') return;
+    fs.appendFileSync(logPath, line + '\n');
+    // Check size periodically (every ~100 writes via WARN/ERROR or occasional INFO)
+    if (level === 'WARN' || level === 'ERROR') {
+      const stat = fs.statSync(logPath);
+      _logSizeExceeded = stat.size > MAX_LOG_SIZE;
+    }
   } catch (_) {}
 }
 
@@ -172,8 +190,9 @@ function authMiddleware(req, res, next) {
   if (req.path === '/api/login' || req.path === '/api/groups' || req.path.startsWith('/api/groups/')) {
     return next();
   }
-  // Allow static assets (css, fonts)
-  if (req.path === '/style.css') {
+  // Allow static assets (css, fonts) and PWA assets
+  if (req.path === '/style.css' || req.path === '/manifest.json' ||
+      req.path === '/sw.js' || req.path === '/icon.svg') {
     return next();
   }
 
@@ -206,6 +225,9 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '5mb' }));
 
 // ========== Request Logging Middleware ==========
+// Noisy polling endpoints — only log on error (4xx/5xx)
+const QUIET_ROUTES = new Set(['/api/groups', '/api/terminals', '/api/platform', '/api/group-info', '/api/tmux/sessions', '/api/terminal/tmux-sessions']);
+
 app.use((req, res, next) => {
   const start = Date.now();
   const originalEnd = res.end;
@@ -214,6 +236,11 @@ app.use((req, res, next) => {
     const status = res.statusCode;
     // Only log API requests and errors (skip static assets to reduce noise)
     if (req.path.startsWith('/api/') || status >= 400) {
+      // Skip successful polling endpoints to save disk I/O
+      if (status < 400 && QUIET_ROUTES.has(req.path)) {
+        originalEnd.apply(this, args);
+        return;
+      }
       const level = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
       log[level]('http', `${req.method} ${req.path} → ${status} (${duration}ms)`, {
         ip: req.ip || req.connection?.remoteAddress,
@@ -227,10 +254,12 @@ app.use((req, res, next) => {
 
 // ========== Master Auth Middleware ==========
 function masterAuthMiddleware(req, res, next) {
-  // Always allow: login page, master auth APIs, static assets
+  // Always allow: login page, master auth APIs, static assets, PWA assets
   if (req.path === '/login' || req.path === '/login.html' ||
       req.path === '/api/master-status' || req.path === '/api/master-login' ||
-      req.path === '/api/master-setup' || req.path === '/style.css') {
+      req.path === '/api/master-setup' || req.path === '/style.css' ||
+      req.path === '/manifest.json' || req.path === '/sw.js' ||
+      req.path === '/icon.svg') {
     return next();
   }
 
@@ -569,30 +598,120 @@ async function resolveDirectory(inputPath) {
   }
 }
 
+/** Git Bash / MSYS bash paths on Windows (node-pty needs a real executable path). */
+function getWindowsBashPath() {
+  if (process.platform !== 'win32') return null;
+  const roots = [
+    process.env.ProgramFiles,
+    process.env['ProgramFiles(x86)'],
+    'C:\\Program Files',
+    'C:\\Program Files (x86)'
+  ].filter(Boolean);
+  const seen = new Set();
+  for (const root of roots) {
+    const norm = path.normalize(root);
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    const p = path.join(norm, 'Git', 'usr', 'bin', 'bash.exe');
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch (_) {}
+  }
+  return null;
+}
+
+/** Bash used to run tmux (Git Bash on Windows, /bin/bash elsewhere). */
+function getBashPathForTmux() {
+  if (process.platform === 'win32') return getWindowsBashPath();
+  return '/bin/bash';
+}
+
+function shellSingleQuoteForBash(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
+/** Tmux session names: conservative charset to avoid shell injection. */
+function validateTmuxSessionName(raw) {
+  const name = String(raw || '').trim();
+  if (name.length < 1 || name.length > 200) return null;
+  if (!/^[\w.+:\-@]+$/.test(name)) return null;
+  return name;
+}
+
+/**
+ * List tmux sessions (name + attached). Requires tmux in PATH inside that bash environment.
+ */
+function listTmuxSessionsFromHost() {
+  const bash = getBashPathForTmux();
+  if (!bash) {
+    return { ok: true, tmuxInstalled: false, sessions: [], hint: 'Git Bash not found — tmux attach needs Bash on Windows.' };
+  }
+  const script = 'command -v tmux >/dev/null 2>&1 || { echo __NO_TMUX__; exit 0; }; tmux list-sessions -F \'#{session_name},#{session_attached}\' 2>/dev/null || true';
+  const r = spawnSync(bash, ['-lc', script], {
+    encoding: 'utf8',
+    timeout: 8000,
+    maxBuffer: 256 * 1024
+  });
+  const out = ((r.stdout || '') + '').trim();
+  const lines = out ? out.split('\n').filter(Boolean) : [];
+  if (lines[0] === '__NO_TMUX__') {
+    return { ok: true, tmuxInstalled: false, sessions: [], hint: 'tmux is not installed or not in PATH.' };
+  }
+  const sessions = [];
+  for (const line of lines) {
+    const comma = line.lastIndexOf(',');
+    if (comma <= 0) continue;
+    const name = line.slice(0, comma);
+    const att = line.slice(comma + 1);
+    if (!name) continue;
+    sessions.push({
+      name,
+      attached: att === '1'
+    });
+  }
+  return { ok: true, tmuxInstalled: true, sessions, hint: sessions.length ? null : 'No tmux server (no sessions in background).' };
+}
+
+function handleListTmuxSessionsApi(req, res) {
+  try {
+    const result = listTmuxSessionsFromHost();
+    res.json(result);
+  } catch (err) {
+    log.error('tmux', `list-sessions failed: ${err.message}`);
+    res.status(500).json({ ok: false, sessions: [], hint: err.message });
+  }
+}
+
 // GET /api/platform — return server OS platform and available shells
 app.get('/api/platform', (req, res) => {
   const plat = process.platform; // 'win32', 'darwin', 'linux', etc.
   let shells;
+  let defaultShell = 'bash';
   if (plat === 'win32') {
     shells = [
+      { id: 'bash', label: 'Bash', icon: '$' },
       { id: 'powershell', label: 'PowerShell', icon: 'PS' },
-      { id: 'cmd', label: 'CMD', icon: '>' },
-      { id: 'bash', label: 'Bash', icon: '$' }
+      { id: 'cmd', label: 'CMD', icon: '>' }
     ];
+    defaultShell = getWindowsBashPath() ? 'bash' : 'powershell';
   } else if (plat === 'darwin') {
     shells = [
       { id: 'zsh', label: 'Zsh', icon: '$' },
       { id: 'bash', label: 'Bash', icon: '$' }
     ];
+    defaultShell = shells[0].id;
   } else {
     shells = [
       { id: 'bash', label: 'Bash', icon: '$' },
       { id: 'zsh', label: 'Zsh', icon: '$' },
       { id: 'sh', label: 'sh', icon: '$' }
     ];
+    defaultShell = shells[0].id;
   }
-  res.json({ platform: plat, shells });
+  res.json({ platform: plat, shells, defaultShell });
 });
+
+app.get(['/api/tmux/sessions', '/api/terminal/tmux-sessions'], handleListTmuxSessionsApi);
 
 // GET /api/fs/drives — list available drive letters (Windows only)
 app.get('/api/fs/drives', async (req, res) => {
@@ -687,6 +806,7 @@ app.get('/api/fs/read', async (req, res) => {
       return res.status(415).json({ error: 'Binary file cannot be displayed' });
     }
 
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     const content = await fsPromises.readFile(real, 'utf-8');
     res.json({
       path: real,
@@ -797,7 +917,8 @@ app.get('/api/fs/preview', async (req, res) => {
     res.setHeader('Content-Type', mime);
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileName)}"`);
     res.setHeader('Content-Length', stat.size);
-    res.setHeader('Cache-Control', 'private, max-age=300'); // 5 min cache
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('ETag', `"${stat.mtimeMs}-${stat.size}"`); // mtime-based ETag for conditional requests
 
     const stream = fs.createReadStream(real);
     stream.pipe(res);
@@ -1003,7 +1124,8 @@ app.post('/api/upload-images', (req, res) => {
     return res.status(400).json({ error: 'multipart/form-data required' });
   }
 
-  const boundary = contentType.split('boundary=')[1];
+  // boundary may be quoted ("...") and/or followed by other params (; charset=...).
+  const boundary = (contentType.split('boundary=')[1] || '').split(';')[0].trim().replace(/^"|"$/g, '');
   if (!boundary) return res.status(400).json({ error: 'No boundary' });
 
   const chunks = [];
@@ -1013,14 +1135,20 @@ app.post('/api/upload-images', (req, res) => {
       const body = Buffer.concat(chunks);
       const parts = parseMultipart(body, boundary);
       const saved = [];
+      const allowed = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
 
       for (const part of parts) {
         if (!part.filename) continue;
 
-        // Sanitize filename, keep extension
-        const ext = path.extname(part.filename).toLowerCase() || '.png';
-        const allowed = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
-        if (!allowed.includes(ext)) continue;
+        // Accept by extension OR by the part's declared image/* Content-Type (covers odd /
+        // missing extensions). Map unknown-but-image types to a sane extension.
+        let ext = path.extname(part.filename).toLowerCase();
+        const ctImage = /^image\//i.test(part.contentType || '');
+        if (!allowed.includes(ext)) {
+          if (!ctImage) continue;
+          const fromCt = '.' + (part.contentType.split('/')[1] || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
+          ext = allowed.includes(fromCt) ? fromCt : '.png';
+        }
 
         const ts = Date.now();
         const rand = crypto.randomBytes(4).toString('hex');
@@ -1033,6 +1161,12 @@ app.post('/api/upload-images', (req, res) => {
       }
 
       if (saved.length === 0) {
+        // Diagnostic: show exactly what arrived so we can tell an empty body from a boundary
+        // mismatch from a header-format issue.
+        log.warn('upload', `No valid image parts. ct="${contentType}" boundary="${boundary}" ` +
+          `bodyBytes=${body.length} parts=${parts.length} ` +
+          `partInfo=${JSON.stringify(parts.map(p => ({ filename: p.filename, field: p.fieldName, ct: p.contentType, dataLen: p.data && p.data.length })))} ` +
+          `bodyHead=${JSON.stringify(body.slice(0, 220).toString('latin1'))}`);
         return res.status(400).json({ error: 'No valid image files found' });
       }
 
@@ -1113,31 +1247,44 @@ function parseMultipart(body, boundary) {
     if (idx === -1) break;
 
     if (start > 0) {
-      // Extract part between previous boundary and this one
-      // Skip \r\n after boundary, and \r\n before next boundary
-      let partStart = start;
-      let partEnd = idx - 2; // remove trailing \r\n
-      if (partEnd > partStart) {
-        const partBuf = body.slice(partStart, partEnd);
-        const headerEnd = partBuf.indexOf('\r\n\r\n');
+      // Extract part between previous boundary and this one. Line breaks may be CRLF or
+      // bare LF — some paths (proxies / clients) normalize \r\n → \n in the body, and a
+      // strict \r\n-only parser then finds no header separator and silently drops the part.
+      let partEnd = idx;
+      if (partEnd >= start + 2 && body[partEnd - 2] === 0x0d && body[partEnd - 1] === 0x0a) partEnd -= 2;
+      else if (partEnd >= start + 1 && body[partEnd - 1] === 0x0a) partEnd -= 1;
+      if (partEnd > start) {
+        const partBuf = body.slice(start, partEnd);
+        // Header/body separator: a blank line — CRLF (\r\n\r\n) or LF (\n\n).
+        let headerEnd = partBuf.indexOf('\r\n\r\n');
+        let sepLen = 4;
+        if (headerEnd === -1) { headerEnd = partBuf.indexOf('\n\n'); sepLen = 2; }
         if (headerEnd !== -1) {
           const headerStr = partBuf.slice(0, headerEnd).toString('utf-8');
-          const data = partBuf.slice(headerEnd + 4);
+          const data = partBuf.slice(headerEnd + sepLen);
 
-          // Parse headers
-          const filenameMatch = headerStr.match(/filename="([^"]+)"/);
-          const filename = filenameMatch ? filenameMatch[1] : null;
-          const nameMatch = headerStr.match(/name="([^"]+)"/);
-          const fieldName = nameMatch ? nameMatch[1] : null;
+          // Parse headers. Accept quoted or unquoted filename/name (some clients omit quotes),
+          // and RFC 5987 filename*=. Capture the part's Content-Type for validation fallback.
+          const fnMatch = headerStr.match(/filename\*?=(?:"([^"]*)"|([^;\r\n]+))/i);
+          let filename = fnMatch ? (fnMatch[1] !== undefined ? fnMatch[1] : fnMatch[2].trim()) : null;
+          if (filename && /^[^']*''/.test(filename)) {
+            // RFC 5987: "UTF-8''na%20me.png" → decode the value after the second quote
+            try { filename = decodeURIComponent(filename.replace(/^[^']*''/, '')); } catch (_) {}
+          }
+          const nameMatch = headerStr.match(/(?:^|;|\s)name=(?:"([^"]*)"|([^;\r\n]+))/i);
+          const fieldName = nameMatch ? (nameMatch[1] !== undefined ? nameMatch[1] : nameMatch[2].trim()) : null;
+          const ctMatch = headerStr.match(/content-type:\s*([^\r\n]+)/i);
+          const partContentType = ctMatch ? ctMatch[1].trim() : null;
 
-          parts.push({ headers: headerStr, filename, fieldName, data });
+          parts.push({ headers: headerStr, filename, fieldName, contentType: partContentType, data });
         }
       }
     }
 
     start = idx + sep.length;
-    // Skip \r\n after boundary
+    // Skip the line break after the boundary (\r\n or bare \n).
     if (body[start] === 0x0d && body[start + 1] === 0x0a) start += 2;
+    else if (body[start] === 0x0a) start += 1;
     // Check for -- (end marker)
     if (body[start] === 0x2d && body[start + 1] === 0x2d) break;
   }
@@ -1190,10 +1337,18 @@ setInterval(() => {
 }, 60 * 60 * 1000); // every hour
 
 // Serve static files (after auth)
+// Serve manifest with correct MIME type for PWA installability
+app.get('/manifest.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/manifest+json');
+  res.sendFile(path.join(__dirname, 'public', 'manifest.json'));
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ========== Terminal state (persistent, per-group) ==========
 const terminals = new Map(); // id -> { pty, shell, created, clients, getBuffer, shellLabel, group }
+
+// ANSI-aware scrollback line buffer lives in ./lib/lineBuffer (createLineBuffer),
+// extracted for unit testing (test/lineBuffer.test.js).
 let nextId = 1;
 
 function getTerminalsForGroup(groupName) {
@@ -1224,11 +1379,23 @@ app.get('/api/group-info', (req, res) => {
 });
 
 app.post('/api/terminal/new', async (req, res) => {
-  const shell = req.body.shell || 'bash';
+  const shell = req.body.shell
+    || (process.platform === 'win32'
+      ? (getWindowsBashPath() ? 'bash' : 'powershell')
+      : 'bash');
   const cols = parseInt(req.body.cols) || 120;
   const rows = parseInt(req.body.rows) || 40;
   const group = req.group;
   const requestedCwd = req.body.cwd || '';
+
+  let tmuxAttachName = null;
+  const rawTmuxSession = req.body.tmuxSession;
+  if (rawTmuxSession != null && String(rawTmuxSession).trim()) {
+    tmuxAttachName = validateTmuxSessionName(rawTmuxSession);
+    if (!tmuxAttachName) {
+      return res.status(400).json({ error: 'Invalid tmux session name.' });
+    }
+  }
 
   // Check max terminals for group
   const groupConfig = groupsConfig.find(g => g.name === group);
@@ -1254,15 +1421,24 @@ app.post('/api/terminal/new', async (req, res) => {
 
   if (isWin) {
     // Windows: node-pty needs full paths
-    if (shell === 'powershell.exe' || shell === 'powershell') {
+    if (shell === 'bash' || shell === 'bash.exe') {
+      shellCmd = getWindowsBashPath();
+      shellLabel = 'bash';
+      if (!shellCmd) {
+        return res.status(400).json({
+          error: 'Git Bash not found. Install Git for Windows, or use PowerShell / CMD.'
+        });
+      }
+    } else if (shell === 'powershell.exe' || shell === 'powershell') {
       shellCmd = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
       shellLabel = 'powershell';
     } else if (shell === 'cmd.exe' || shell === 'cmd') {
       shellCmd = 'C:\\Windows\\System32\\cmd.exe';
       shellLabel = 'cmd';
     } else {
-      shellCmd = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe';
-      shellLabel = 'bash';
+      // Legacy default / unknown id: prefer PowerShell on Windows
+      shellCmd = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+      shellLabel = 'powershell';
     }
   } else {
     // macOS / Linux: use standard shell paths
@@ -1278,58 +1454,67 @@ app.post('/api/terminal/new', async (req, res) => {
     }
   }
 
-  log.info('pty', `Creating terminal ${id} for group "${group}": ${shellCmd} (${cols}x${rows}) cwd=${cwd}`);
+  let shellArgs = [];
+  if (tmuxAttachName) {
+    const bashPath = getBashPathForTmux();
+    if (!bashPath) {
+      return res.status(400).json({
+        error: 'Bash not available on this hub — attaching tmux needs Git Bash (Windows) or /bin/bash (Unix).'
+      });
+    }
+    shellCmd = bashPath;
+    shellLabel = 'bash';
+    const launchCmd = `exec tmux attach -t ${shellSingleQuoteForBash(tmuxAttachName)} || exec "$SHELL" -l`;
+    shellArgs = ['-lic', launchCmd];
+  }
+
+  log.info('pty', `Creating terminal ${id} for group "${group}": ${shellCmd} (${cols}x${rows}) cwd=${cwd}`
+    + `${tmuxAttachName ? ` attachTmux=${tmuxAttachName}` : ''}`);
 
   try {
-    const ptyProc = pty.spawn(shellCmd, [], {
+    const MAX_BUFFER_BYTES = 20 * 1024 * 1024; // 20MB per terminal
+    // Force non-CJK locale so apps that compute char widths via wcwidth / unicode-width
+    // tables (Cursor CLI, ratatui, blessed, etc.) treat East-Asian Ambiguous chars
+    // (e.g., box-drawing │ ─ ┌ ┐) as 1 col — matching xterm.js's default rendering.
+    // CJK locale would make them 2 cols, causing app layout to drift vs xterm grid.
+    const ptyProc = pty.spawn(shellCmd, shellArgs, {
       name: 'xterm-256color',
-      cols,
-      rows,
+      cols, rows,
       cwd,
-      env: process.env
+      env: { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' }
     });
 
-    let outputBuffer = '';
-    const MAX_BUFFER = 100000; // 100KB buffer for reconnection
+    const lineBuf = createLineBuffer(MAX_BUFFER_BYTES);
+    const termInfo = {
+      pty: ptyProc,
+      shell: shellCmd,
+      shellLabel,
+      lineBuf,
+      created: new Date().toISOString(),
+      clients: new Set(),
+      group,
+      cols, rows, // last known PTY winsize — reconnecting clients adopt this so replayed
+                  // scrollback matches the width it was wrapped at (avoids overflow on reopen).
+    };
 
     ptyProc.onData((data) => {
-      outputBuffer += data;
-      if (outputBuffer.length > MAX_BUFFER) {
-        outputBuffer = outputBuffer.slice(-MAX_BUFFER);
-      }
-      const info = terminals.get(id);
-      if (info && info.clients) {
-        for (const ws of info.clients) {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'output', data }));
-          }
+      lineBuf.append(data);
+      if (termInfo.clients) {
+        const msg = JSON.stringify({ type: 'output', data });
+        for (const ws of termInfo.clients) {
+          try {
+            if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+          } catch (_) { termInfo.clients.delete(ws); }
         }
       }
     });
 
     ptyProc.onExit(({ exitCode }) => {
-      log.info('pty', `Terminal ${id} exited with code ${exitCode}`);
-      const info = terminals.get(id);
-      if (info) {
-        for (const ws of info.clients) {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'exit', code: exitCode }));
-            ws.close();
-          }
-        }
-      }
-      terminals.delete(id);
+      log.info('pty', `Terminal ${id} exited (code ${exitCode})`);
+      cleanupTerminal(id);
     });
 
-    terminals.set(id, {
-      pty: ptyProc,
-      shell: shellCmd,
-      shellLabel,
-      created: new Date().toISOString(),
-      clients: new Set(),
-      getBuffer: () => outputBuffer,
-      group // tag terminal with its group
-    });
+    terminals.set(id, termInfo);
 
     res.json({ id, shell: shellLabel, cols, rows, group, cwd });
   } catch (err) {
@@ -1338,7 +1523,7 @@ app.post('/api/terminal/new', async (req, res) => {
   }
 });
 
-app.post('/api/terminal/:id/resize', (req, res) => {
+app.post('/api/terminal/:id/resize', async (req, res) => {
   const id = parseInt(req.params.id);
   const info = terminals.get(id);
   if (!info) return res.status(404).json({ error: 'Terminal not found' });
@@ -1347,17 +1532,55 @@ app.post('/api/terminal/:id/resize', (req, res) => {
   const cols = parseInt(req.body.cols) || 120;
   const rows = parseInt(req.body.rows) || 40;
   info.pty.resize(cols, rows);
+  info.cols = cols; info.rows = rows;
   res.json({ ok: true, cols, rows });
 });
 
-app.delete('/api/terminal/:id', (req, res) => {
+// Fetch older scrollback by absolute line range.
+// Query: ?fromLine=N&maxBytes=B (returns lines starting at fromLine until either
+// end-of-buffer or maxBytes accumulated, whichever comes first).
+app.get('/api/terminal/:id/scrollback', (req, res) => {
+  const id = parseInt(req.params.id);
+  const info = terminals.get(id);
+  if (!info) return res.status(404).json({ error: 'Terminal not found' });
+  if (info.group !== req.group) return res.status(403).json({ error: 'Not your terminal' });
+
+  const buf = info.lineBuf;
+  const maxBytes = Math.min(20 * 1024 * 1024, parseInt(req.query.maxBytes) || 5 * 1024 * 1024);
+  const totalLines = buf.firstLineIndex + buf.lines.length;
+  // toLine = exclusive upper bound (walk backward). Defaults to current end.
+  const toLine = Math.min(totalLines, parseInt(req.query.toLine) || totalLines);
+
+  let endLocal = toLine - buf.firstLineIndex; // exclusive
+  if (endLocal < 0) endLocal = 0;
+  if (endLocal > buf.lines.length) endLocal = buf.lines.length;
+
+  let acc = 0;
+  let startLocal = endLocal;
+  while (startLocal > 0 && acc < maxBytes) {
+    startLocal--;
+    acc += buf.lines[startLocal].bytes;
+  }
+  const out = [];
+  for (let i = startLocal; i < endLocal; i++) out.push(buf.lines[i].data);
+
+  res.json({
+    data: out.join(''),
+    firstLineIndex: buf.firstLineIndex,
+    startLine: buf.firstLineIndex + startLocal,
+    endLine: buf.firstLineIndex + endLocal,
+    bytes: acc,
+  });
+});
+
+app.delete('/api/terminal/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   const info = terminals.get(id);
   if (!info) return res.status(404).json({ error: 'Terminal not found' });
   if (info.group !== req.group) return res.status(403).json({ error: 'Not your terminal' });
 
   try {
-    info.pty.kill();
+    try { info.pty.kill(); } catch (_) {}
     terminals.delete(id);
     res.json({ ok: true, id });
   } catch (err) {
@@ -1365,10 +1588,41 @@ app.delete('/api/terminal/:id', (req, res) => {
   }
 });
 
+function cleanupTerminal(id) {
+  const info = terminals.get(id);
+  if (info) {
+    for (const ws of info.clients) {
+      try {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'exit', code: 0 }));
+          ws.close();
+        }
+      } catch (_) {}
+    }
+  }
+  terminals.delete(id);
+}
+
 // ========== Server + WebSocket ==========
 
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ noServer: true, maxPayload: 5 * 1024 * 1024 });
+// permessage-deflate: history + output are ANSI text and compress ~5-10x, which is the
+// biggest lever for clients on a slow last-mile link (mobile/cellular through the tunnel).
+// Browsers negotiate it automatically — no client change needed.
+//  - threshold 1024: don't waste CPU compressing tiny frames (single-keystroke echoes).
+//  - noContextTakeover (both sides): bound per-connection zlib memory; the large history
+//    message still compresses fully on its own, so we lose little on what matters.
+const wss = new WebSocket.Server({
+  noServer: true,
+  maxPayload: 5 * 1024 * 1024,
+  perMessageDeflate: {
+    threshold: 1024,
+    zlibDeflateOptions: { level: 6 },
+    serverNoContextTakeover: true,
+    clientNoContextTakeover: true,
+    concurrencyLimit: 10,
+  },
+});
 
 // WebSocket upgrade — validate master token + group token + group isolation
 server.on('upgrade', (req, socket, head) => {
@@ -1432,11 +1686,31 @@ wss.on('connection', (ws, req) => {
   log.info('ws', `Client connected to terminal ${id} (group: ${ws._group})`);
   info.clients.add(ws);
 
-  // Send buffered output
-  const buffer = info.getBuffer();
-  if (buffer) {
-    ws.send(JSON.stringify({ type: 'output', data: buffer }));
-  }
+  // Send a SMALL tail of scrollback for instant first paint. Older lines load on demand via
+  // /api/terminal/:id/scrollback when the user scrolls up. The tail SIZE is chosen by the
+  // frontend (?tail= on the WS URL) so it can be tuned client-side without a server change;
+  // we clamp it to a safe range. WS permessage-deflate compresses the tail heavily, so a
+  // larger value is cheap on the wire.
+  const DEFAULT_TAIL = parseInt(process.env.HUB_INITIAL_TAIL_BYTES, 10) || 256 * 1024;
+  const reqTail = parseInt(url.searchParams.get('tail'), 10);
+  const INITIAL_TAIL_BYTES = Math.min(20 * 1024 * 1024, Math.max(4096, Number.isFinite(reqTail) ? reqTail : DEFAULT_TAIL));
+  const tail = info.lineBuf.tailByBytes(INITIAL_TAIL_BYTES);
+  let initialData = '';
+  for (const ln of tail.lines) initialData += ln.data;
+  initialData += tail.pending;
+  log.info('ws', `Sending history to terminal ${id}: ${initialData.length} bytes (lines ${tail.startLine}-${tail.endLine})`);
+  ws.send(JSON.stringify({
+    type: 'history',
+    data: initialData,
+    cols: info.cols,
+    rows: info.rows,
+    // On the alternate screen (tmux/vim/…) the scrollback isn't cached — tell the client so it
+    // nudges the app (SIGWINCH) to repaint the current screen instead of relying on replay.
+    altScreen: info.lineBuf.altScreen,
+    firstLineIndex: info.lineBuf.firstLineIndex,
+    startLine: tail.startLine,
+    endLine: tail.endLine,
+  }));
 
   ws.on('message', (msg) => {
     // Re-validate token on each message
@@ -1454,11 +1728,17 @@ wss.on('connection', (ws, req) => {
           break;
         case 'resize':
           info.pty.resize(parsed.cols, parsed.rows);
+          info.cols = parsed.cols; info.rows = parsed.rows;
           break;
       }
     } catch (err) {
       info.pty.write(msg.toString());
     }
+  });
+
+  ws.on('error', (err) => {
+    log.warn('ws', `Client error on terminal ${id}: ${err.message}`);
+    info.clients.delete(ws);
   });
 
   ws.on('close', () => {
