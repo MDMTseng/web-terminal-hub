@@ -4230,12 +4230,11 @@
             s._firstLineIndex = msg.firstLineIndex || 0;
             s._oldestLoadedLine = msg.startLine || 0;
             s._endLine = msg.endLine || 0;
-            // Adopt the PTY's existing winsize so the replayed scrollback is wrapped at the same
-            // width it was produced at, instead of our own (possibly not-yet-stable) fit. The
-            // initial-geometry re-measure converges this to the real viewport shortly after.
-            if (msg.cols && msg.rows && (s.terminal.cols !== msg.cols || s.terminal.rows !== msg.rows)) {
-              try { s.terminal.resize(msg.cols, msg.rows); } catch (_) {}
-            }
+            // NOTE: do NOT adopt the server's stored cols/rows here. It could be a stale size from
+            // a previous orientation (e.g. landscape), and adopting it pinned every reconnect to
+            // that size — so after rotating, reopening the app never restored the height. The
+            // client fits to its OWN current viewport (onopen + initial-geometry) and xterm reflows
+            // the replayed scrollback to that width.
             // After any history payload (initial load / reconnect / mobile resume),
             // require a fresh user gesture before the load-older confirm can fire again.
             s._userGestureSinceReset = false;
@@ -4522,8 +4521,12 @@
     window.addEventListener('orientationchange', () => {
       _vvLastH = null;
       setTimeout(() => {
+        // Orientation flip is a real resize: drop the per-orientation cols lock so safeFit
+        // re-measures fresh, then fit so rows/cols sync to the new viewport (the locked-grid
+        // guard otherwise leaves rows stuck at the previous orientation's height).
+        try { clearMobileLockedGrid(); } catch (_) {}
+        if (activeId && sessions[activeId]) fitAndKeepScroll(sessions[activeId]);
         if (window.visualViewport) handleViewportChange();
-        else if (activeId && sessions[activeId]) fitAndKeepScroll(sessions[activeId]);
       }, 200);
     });
 
