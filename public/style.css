@@ -493,7 +493,9 @@ html, body {
   padding-top: 3px;
   border-top: 1px solid var(--border-subtle);
   margin-top: 2px;
-  flex: 1 1 auto;
+  /* Content-sized (don't share flex-grow with #terminal-area, which caused a sub-row height
+     jitter that triggered an off-by-one re-fit / flash when opening the drawer). */
+  flex: 0 0 auto;
   min-height: 0;
   /* Cap height so extra keys scroll inside the keypad instead of stealing the terminal. */
   max-height: min(38vh, 300px);

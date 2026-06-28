@@ -60,10 +60,11 @@
       </div>
       <!-- Expanded rows (hidden by default) -->
       <div id="vk-expanded" class="vk-expanded hidden">
-        <!-- Mode toggle: Shell / Claude -->
+        <!-- Mode toggle: Shell / Claude / Setting -->
         <div class="vk-row vk-mode-toggle">
           <button class="vk-mode-btn" id="vk-mode-shell" onclick="switchVkMode('shell')">Shell</button>
           <button class="vk-mode-btn active" id="vk-mode-claude" onclick="switchVkMode('claude')">Claude</button>
+          <button class="vk-mode-btn" id="vk-mode-setting" onclick="switchVkMode('setting')">⚙ Setting</button>
         </div>
 
         <!-- ===== Claude Code Keys ===== -->
@@ -93,30 +94,6 @@
 
         <!-- ===== Shell keys + snippets ===== -->
         <div id="vk-shell-keys" class="hidden">
-          <div class="vk-shell-scrollback" title="Max scrollback lines (lower = faster after app switch / lighter memory; higher = scroll back further in Claude Code, shells, etc.)">
-            <span class="vk-shell-scrollback-label">Buf</span>
-            <input type="range" id="termhub-scrollback-range" min="100" max="20000" step="100" />
-            <span class="vk-shell-scrollback-value" id="termhub-scrollback-value">5000</span>
-          </div>
-          <div class="vk-shell-scrollback" title="PTY width slack for TUIs (e.g. Cursor CLI): fewer cols than the grid; 0 = same as grid. Saves automatically.">
-            <span class="vk-shell-scrollback-label">PTY−</span>
-            <input type="range" id="termhub-pty-margin-range" min="0" max="48" step="1" />
-            <span class="vk-shell-scrollback-value" id="termhub-pty-margin-value">0</span>
-          </div>
-          <div class="vk-shell-scrollback" title="Render throttle: when PTY output exceeds X KB/s, batch writes to 2 fps (500ms). Higher = throttle later; max = off.">
-            <span class="vk-shell-scrollback-label">Thr</span>
-            <input type="range" id="termhub-throttle-range" min="50" max="2000" step="50" />
-            <span class="vk-shell-scrollback-value" id="termhub-throttle-value">300</span>
-          </div>
-          <div class="vk-shell-scrollback" title="Mobile only: terminal width is locked per orientation (avoids SIGWINCH storms from address-bar / keyboard jitter). Tap to re-measure for the current orientation.">
-            <span class="vk-shell-scrollback-label">W</span>
-            <span class="vk-shell-scrollback-value" id="termhub-locked-cols-value">auto</span>
-            <button type="button" id="termhub-relock-btn" style="margin-left:8px;padding:2px 8px;font-size:12px;border-radius:4px;border:1px solid #555;background:#222;color:#ddd;">Re-fit</button>
-          </div>
-          <div class="vk-shell-scrollback" title="Loaded scrollback size for the active tab. Initial WS sync is ~1MB; scroll up near top to fetch +5MB chunks (up to 20MB).">
-            <span class="vk-shell-scrollback-label">Hist</span>
-            <span class="vk-shell-scrollback-value" id="termhub-history-size">0 KB</span>
-          </div>
           <!-- User-defined snippets. Tap to send, long-press to edit. -->
           <div class="vk-snippet-strip">
             <div class="vk-snippet-row" id="vk-snippet-row"></div>
@@ -167,6 +144,14 @@
             <button class="vk-key vk-action" data-char=";">;</button>
           </div>
         </div>
+
+        <!-- ===== Setting ===== -->
+        <div id="vk-setting-keys" class="hidden">
+          <div class="vk-row">
+            <button type="button" class="vk-key" id="vk-display-btn" title="Display settings" onclick="openModal('display-modal')">🖥 Display</button>
+            <button type="button" class="vk-key" id="vk-diag-btn" title="Connection timing log" onclick="openDiagModal()">🐞 Log</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -180,6 +165,65 @@
       </div>
       <button type="button" class="statusbar-footer-btn statusbar-files-btn" id="vk-files-btn" title="File Manager">📁 Files</button>
       <button type="button" class="statusbar-footer-btn" id="switch-group-btn" title="Switch group">⇄ Groups</button>
+    </div>
+
+    <!-- Display / terminal settings -->
+    <div id="display-modal" class="modal hidden">
+      <div class="modal-backdrop" onclick="closeModal('display-modal')"></div>
+      <div class="modal-content" style="max-width:520px;width:92vw;">
+        <h3>🖥 Display settings</h3>
+        <div class="vk-shell-scrollback" title="Max scrollback lines (lower = faster after app switch / lighter memory; higher = scroll back further).">
+          <span class="vk-shell-scrollback-label" style="min-width:96px;text-align:left;">Scrollback</span>
+          <input type="range" id="termhub-scrollback-range" min="100" max="20000" step="100" />
+          <span class="vk-shell-scrollback-value" id="termhub-scrollback-value">5000</span>
+        </div>
+        <div class="vk-shell-scrollback" title="PTY width slack for TUIs (e.g. Cursor CLI): fewer cols than the grid; 0 = same as grid. Saves automatically.">
+          <span class="vk-shell-scrollback-label" style="min-width:96px;text-align:left;">PTY width −</span>
+          <input type="range" id="termhub-pty-margin-range" min="0" max="48" step="1" />
+          <span class="vk-shell-scrollback-value" id="termhub-pty-margin-value">0</span>
+        </div>
+        <div class="vk-shell-scrollback" title="Render throttle: when PTY output exceeds X KB/s, batch writes to 2 fps (500ms). Higher = throttle later; max = off.">
+          <span class="vk-shell-scrollback-label" style="min-width:96px;text-align:left;">Render throttle</span>
+          <input type="range" id="termhub-throttle-range" min="50" max="2000" step="50" />
+          <span class="vk-shell-scrollback-value" id="termhub-throttle-value">300</span>
+        </div>
+        <div class="vk-shell-scrollback" title="Touch-scroll speed inside full-screen apps (tmux/vim, alternate screen). Value = finger travel (character rows) per scroll step — HIGHER = SLOWER. Saves automatically.">
+          <span class="vk-shell-scrollback-label" style="min-width:96px;text-align:left;">tmux scroll</span>
+          <input type="range" id="termhub-altscroll-range" min="0.5" max="6" step="0.5" />
+          <span class="vk-shell-scrollback-value" id="termhub-altscroll-value">2.5</span>
+        </div>
+        <div class="vk-shell-scrollback" title="Flip touch-scroll direction inside full-screen apps (tmux/vim). Saves automatically.">
+          <span class="vk-shell-scrollback-label" style="min-width:96px;text-align:left;">Scroll dir</span>
+          <button type="button" id="termhub-altscroll-dir" class="statusbar-footer-btn" onclick="toggleAltScrollInvert()">Normal</button>
+        </div>
+        <div class="vk-shell-scrollback" title="Mobile only: terminal width is locked per orientation (avoids SIGWINCH storms from address-bar / keyboard jitter). Tap Re-fit to re-measure for the current orientation.">
+          <span class="vk-shell-scrollback-label" style="min-width:96px;text-align:left;">Width lock</span>
+          <span class="vk-shell-scrollback-value" id="termhub-locked-cols-value">auto</span>
+          <button type="button" id="termhub-relock-btn" style="margin-left:8px;padding:2px 8px;font-size:12px;border-radius:4px;border:1px solid #555;background:#222;color:#ddd;">Re-fit</button>
+        </div>
+        <div class="vk-shell-scrollback" title="Loaded scrollback size for the active tab. Scroll up near the top to fetch older chunks.">
+          <span class="vk-shell-scrollback-label" style="min-width:96px;text-align:left;">History size</span>
+          <span class="vk-shell-scrollback-value" id="termhub-history-size">0 KB</span>
+        </div>
+        <div style="margin-top:12px;text-align:right;">
+          <button type="button" class="statusbar-footer-btn" onclick="closeModal('display-modal')">✕ Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Diagnostic timing log (copyable on mobile) -->
+    <div id="diag-modal" class="modal hidden">
+      <div class="modal-backdrop" onclick="closeModal('diag-modal')"></div>
+      <div class="modal-content" style="max-width:680px;width:92vw;">
+        <h3>🐞 Connection timing log</h3>
+        <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+          <button type="button" class="statusbar-footer-btn" onclick="copyDiagLog()">📋 Copy</button>
+          <button type="button" class="statusbar-footer-btn" onclick="clearDiagLog()">🗑 Clear</button>
+          <button type="button" class="statusbar-footer-btn" onclick="closeModal('diag-modal')">✕ Close</button>
+        </div>
+        <textarea id="diag-text" readonly wrap="off"
+          style="width:100%;height:46vh;box-sizing:border-box;font-family:monospace;font-size:12px;line-height:1.4;background:#0b0f14;color:#9fe3c0;border:1px solid #233;border-radius:6px;padding:8px;white-space:pre;overflow:auto;"></textarea>
+      </div>
     </div>
 
     <!-- Text input modal (for iOS voice / IME input + image attach) -->
@@ -280,6 +324,7 @@
         <h3>📂 File Manager</h3>
         <div class="fm-path-row">
           <input type="text" id="fm-path-input" class="form-input dir-path-input" placeholder="Type or paste a path..." />
+          <button class="fm-star-btn" id="fm-copy-path-btn" onclick="copyFmPath()" title="Copy path">📋</button>
           <button class="fm-star-btn" id="fm-star-btn" onclick="toggleFmFavorite()" title="Toggle favorite">☆</button>
         </div>
       </div>
@@ -403,6 +448,68 @@
       }
     }
 
+    // ---- Diagnostic timing log (copyable on mobile) ----
+    // Records timestamped events across the login → WS connect → first-output flow so a
+    // user on a phone can copy the timeline and see exactly where any delay happens.
+    const DIAG_LOG = [];
+    function diag(msg) {
+      const now = performance.now();
+      const prev = DIAG_LOG.length ? DIAG_LOG[DIAG_LOG.length - 1].t : now;
+      DIAG_LOG.push({ t: now, dt: now - prev, wall: Date.now(), msg });
+      if (DIAG_LOG.length > 500) DIAG_LOG.shift();
+      try { renderDiag(); } catch (_) {}
+    }
+    function pad(n, w) { return String(n).padStart(w, '0'); }
+    function diagText() {
+      const head = `Web Terminal Hub diag log — ${navigator.userAgent}\nurl=${location.href}\n` +
+        `(columns: +elapsed since page load | Δ gap from previous line | wall clock)\n` +
+        `${'-'.repeat(60)}\n`;
+      const body = DIAG_LOG.map(e => {
+        const d = new Date(e.wall);
+        const wall = `${pad(d.getHours(),2)}:${pad(d.getMinutes(),2)}:${pad(d.getSeconds(),2)}.${pad(d.getMilliseconds(),3)}`;
+        const elapsed = `+${Math.round(e.t)}ms`.padEnd(9);
+        const gap = e.dt >= 1000 ? `Δ${(e.dt/1000).toFixed(1)}s`.padEnd(8) : `Δ${Math.round(e.dt)}ms`.padEnd(8);
+        return `${elapsed} ${gap} ${wall}  ${e.msg}`;
+      }).join('\n');
+      return head + body + '\n';
+    }
+    function renderDiag() {
+      const ta = document.getElementById('diag-text');
+      if (ta && !document.getElementById('diag-modal').classList.contains('hidden')) {
+        ta.value = diagText();
+        ta.scrollTop = ta.scrollHeight;
+      }
+    }
+    function openDiagModal() {
+      const ta = document.getElementById('diag-text');
+      if (ta) { ta.value = diagText(); ta.scrollTop = ta.scrollHeight; }
+      openModal('diag-modal');
+    }
+    function clearDiagLog() {
+      DIAG_LOG.length = 0;
+      diag('log cleared');
+    }
+    async function copyDiagLog() {
+      const text = diagText();
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast('Log copied to clipboard', 'info');
+        return;
+      } catch (_) { /* fall through to legacy path */ }
+      // Fallback for non-secure contexts / older mobile WebViews
+      const ta = document.getElementById('diag-text');
+      try {
+        ta.removeAttribute('readonly');
+        ta.focus();
+        ta.setSelectionRange(0, text.length);
+        const ok = document.execCommand('copy');
+        ta.setAttribute('readonly', '');
+        showToast(ok ? 'Log copied' : 'Select the text and copy manually', ok ? 'info' : 'error');
+      } catch (_) {
+        showToast('Long-press the text to select and copy', 'error');
+      }
+    }
+
     // ---- Auth helpers ----
     function getToken() {
       const match = document.cookie.match(/(?:^|;\s*)token=([^;]*)/);
@@ -413,6 +520,11 @@
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       return `${proto}//${location.host}/ws`;
     }
+
+    // How much scrollback tail the server should replay on (re)connect. Chosen by the frontend
+    // and sent via the WS URL (?tail=); the server clamps it. Compresses well over WS, so a
+    // larger value is cheap. Tune here.
+    const INITIAL_TAIL_BYTES = 256 * 1024;
 
     function handleKicked(msg) {
       alert('Session expired: ' + (msg || 'Another device logged in to this group.'));
@@ -675,7 +787,10 @@
       // Split path into segments
       const parts = fullPath.split(/[\\/]/).filter(Boolean);
 
-      // On Windows, first part is drive like "C:"
+      // On Windows, first part is drive like "C:" (its own absolute anchor). On POSIX the
+      // leading "/" is dropped by filter(Boolean), so re-add it to keep jumps absolute.
+      const isPosixAbs = sep === '/' && fullPath.startsWith('/');
+      const rootPrefix = isPosixAbs ? '/' : '';
       let accumulated = '';
       parts.forEach((part, i) => {
         if (i > 0) {
@@ -686,7 +801,7 @@
         }
 
         accumulated += (i === 0 ? '' : sep) + part;
-        const segPath = i === 0 ? part + sep : accumulated;
+        const segPath = (i === 0 && !isPosixAbs) ? part + sep : rootPrefix + accumulated;
 
         const btn = document.createElement('button');
         btn.className = 'dir-breadcrumb-seg';
@@ -928,6 +1043,11 @@
       const bc = document.getElementById('fm-breadcrumb');
       bc.innerHTML = '';
       const parts = fullPath.split(/[\\/]/).filter(Boolean);
+      // POSIX absolute paths start with "/", which filter(Boolean) drops — re-add it so
+      // breadcrumb jumps stay absolute (e.g. "/Users/x", not "Users/x"). On Windows the
+      // first segment ("C:") is itself the absolute anchor, so no prefix is needed.
+      const isPosixAbs = sep === '/' && fullPath.startsWith('/');
+      const rootPrefix = isPosixAbs ? '/' : '';
       let accumulated = '';
       parts.forEach((part, i) => {
         if (i > 0) {
@@ -937,7 +1057,7 @@
           bc.appendChild(sepEl);
         }
         accumulated += (i === 0 ? '' : sep) + part;
-        const segPath = i === 0 ? part + sep : accumulated;
+        const segPath = (i === 0 && !isPosixAbs) ? part + sep : rootPrefix + accumulated;
         const btn = document.createElement('button');
         btn.className = 'dir-breadcrumb-seg';
         btn.textContent = part;
@@ -1019,6 +1139,8 @@
 
     function fmSelectFile(entry, fullPath) {
       fmSelectedFile = { ...entry, path: fullPath };
+      // Reflect the tapped file's full path in the path box so it can be read/copied.
+      document.getElementById('fm-path-input').value = fullPath;
       const actionsEl = document.getElementById('fm-file-actions');
       actionsEl.classList.remove('hidden');
       document.getElementById('fm-selected-name').textContent = entry.name;
@@ -1043,6 +1165,26 @@
       fmSelectedFile = null;
       document.getElementById('fm-file-actions').classList.add('hidden');
       document.querySelectorAll('#fm-entry-list .dir-entry-row').forEach(r => r.classList.remove('fm-selected'));
+    }
+
+    // Copy the current path box (a file path after tapping a file, else the current dir).
+    async function copyFmPath() {
+      const inp = document.getElementById('fm-path-input');
+      const text = (inp.value || '').trim();
+      if (!text) { showToast('No path to copy', 'error'); return; }
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast('Path copied', 'info');
+        return;
+      } catch (_) { /* fall through to legacy path (non-secure context / old WebView) */ }
+      try {
+        inp.focus();
+        inp.setSelectionRange(0, text.length);
+        const ok = document.execCommand('copy');
+        showToast(ok ? 'Path copied' : 'Select and copy manually', ok ? 'info' : 'error');
+      } catch (_) {
+        showToast('Copy not supported here', 'error');
+      }
     }
 
     // ---- File Manager Actions ----
@@ -1767,7 +1909,7 @@
     // Expand/collapse extra rows
     let vkExpanded = false;
     function updateModeLabel() {
-      const labelNames = { claude: 'Claude', shell: 'Shell' };
+      const labelNames = { claude: 'Claude', shell: 'Shell', setting: '⚙ Setting' };
       document.getElementById('vk-mode-label').textContent = labelNames[vkMode] || 'Claude';
     }
 
@@ -1777,9 +1919,16 @@
       vkExpanded = !vkExpanded;
       document.getElementById('vk-expanded').classList.toggle('hidden', !vkExpanded);
       document.getElementById('vk-expand-btn').classList.toggle('vk-active', vkExpanded);
-      if (activeId && sessions[activeId]) {
-        setTimeout(() => fitAndKeepScroll(sessions[activeId]), 100);
-      }
+      // Mobile (locked grid): translate the view up by the drawer height instead of shrinking the
+      // terminal → no reflow. Desktop/non-locked: the drawer is in-flow, so the ResizeObserver +
+      // this fit handle the (cheap, instant) reflow. fitAndKeepScroll is a no-op when unchanged.
+      requestAnimationFrame(() => {
+        if (window.visualViewport) handleViewportChange();
+        // In mobile locked-grid (translate) mode the terminal keeps its exact size, so a fit
+        // would only cause an off-by-one row flash — skip it. Desktop/non-locked still fits.
+        const translate = isMobileTouch() && getMobileLockedCols();
+        if (!translate && activeId && sessions[activeId]) setTimeout(() => fitAndKeepScroll(sessions[activeId]), 60);
+      });
     });
 
     // ---- Shell snippet strip ----
@@ -1967,10 +2116,24 @@
       }
     }
 
+    // Server accepts these by extension; anything else (notably iOS HEIC/HEIF) is
+    // transcoded to JPEG client-side before upload (see toUploadableImage).
+    const SERVER_IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'];
+    function imgExt(name) {
+      const m = /\.([a-z0-9]+)$/i.exec(name || '');
+      return m ? m[1].toLowerCase() : '';
+    }
+    function looksLikeImage(f) {
+      if (f.type && f.type.startsWith('image/')) return true;
+      // iOS can hand back an empty MIME type for some Photo Library items — fall back to extension.
+      return [...SERVER_IMAGE_EXTS, 'heic', 'heif', 'avif', 'tif', 'tiff'].includes(imgExt(f.name));
+    }
+
     function handleImageSelect(input) {
       const files = Array.from(input.files || []);
       for (const f of files) {
-        if (!f.type.startsWith('image/')) continue;
+        diag(`image select: name="${f.name}" type="${f.type || '(empty)'}" size=${f.size}`);
+        if (!looksLikeImage(f)) { diag(`  skipped (not an image): ${f.name}`); continue; }
         const url = URL.createObjectURL(f);
         pendingImages.push({ file: f, previewUrl: url });
       }
@@ -2015,21 +2178,90 @@
       renderImagePreviews();
     }
 
+    // Re-encode an image the server can't accept by extension (e.g. iOS HEIC/HEIF) into a
+    // JPEG via <canvas>. Safari can decode HEIC into an <img>, so this also guarantees the
+    // saved file is a format downstream tools (Claude Code) can actually read.
+    function transcodeToJpeg(file) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          try {
+            let w = img.naturalWidth, h = img.naturalHeight;
+            // Cap dimensions — iOS has a hard canvas pixel limit and huge photos OOM.
+            const MAXD = 4096;
+            if (w > MAXD || h > MAXD) { const s = Math.min(MAXD / w, MAXD / h); w = Math.round(w * s); h = Math.round(h * s); }
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            canvas.toBlob(
+              (blob) => { URL.revokeObjectURL(url); blob ? resolve(blob) : reject(new Error('canvas toBlob returned null')); },
+              'image/jpeg', 0.9
+            );
+          } catch (e) { URL.revokeObjectURL(url); reject(e); }
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('browser could not decode image')); };
+        img.src = url;
+      });
+    }
+
+    // Returns { blob, filename } ready for the server: pass-through if the extension is already
+    // accepted, otherwise transcode to JPEG.
+    async function toUploadableImage(file) {
+      if (SERVER_IMAGE_EXTS.includes(imgExt(file.name))) {
+        return { blob: file, filename: file.name };
+      }
+      diag(`transcoding ${file.name || '(unnamed)'} (${file.type || 'no type'}) → JPEG`);
+      const blob = await transcodeToJpeg(file);
+      const base = (file.name || 'image').replace(/\.[^.]*$/, '') || 'image';
+      return { blob, filename: `${base}.jpg` };
+    }
+
     async function uploadImages() {
       if (pendingImages.length === 0) return [];
 
-      const formData = new FormData();
+      showToast('Uploading images...', 'info');
+      // Use XMLHttpRequest + FormData. iOS Safari 26 dropped the request body when uploading
+      // via fetch() (server saw Content-Type but bodyBytes=0); XHR reliably transmits it. Let
+      // the browser set the multipart Content-Type/boundary — don't set it manually.
+      const fd = new FormData();
       for (const img of pendingImages) {
-        formData.append('images', img.file);
+        let blob, filename;
+        try {
+          ({ blob, filename } = await toUploadableImage(img.file));
+        } catch (e) {
+          diag(`image prep failed for ${img.file.name}: ${e.message}`);
+          throw new Error(`Could not process "${img.file.name || 'image'}": ${e.message}`);
+        }
+        // Read bytes into memory and upload a concrete Blob. An iOS photo-picker File reference
+        // can serialize as an empty body (server saw bodyBytes=0); reading it first forces the
+        // data to be materialized and lets us log the actually-readable length.
+        let bytes;
+        try {
+          bytes = await blob.arrayBuffer();
+        } catch (e) {
+          diag(`arrayBuffer read failed for ${filename}: ${e.message}`);
+          throw new Error(`Could not read "${filename}": ${e.message}`);
+        }
+        diag(`upload part: filename="${filename}" type="${blob.type || '(none)'}" declaredSize=${blob.size} readBytes=${bytes.byteLength}`);
+        fd.append('images', new Blob([bytes], { type: blob.type || 'application/octet-stream' }), filename);
       }
 
-      showToast('Uploading images...', 'info');
-      const resp = await authFetch('/api/upload-images', {
-        method: 'POST',
-        body: formData
+      const data = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload-images');
+        xhr.withCredentials = true; // send auth cookies
+        xhr.onload = () => {
+          diag(`upload response: ${xhr.status} ${(xhr.responseText || '').slice(0, 160)}`);
+          if (xhr.status === 401) { window.location.href = '/welcome'; reject(new Error('Unauthorized')); return; }
+          let d = {};
+          try { d = JSON.parse(xhr.responseText); } catch (_) {}
+          if (xhr.status >= 200 && xhr.status < 300 && !d.error) resolve(d);
+          else reject(new Error(d.error || `upload failed (${xhr.status})`));
+        };
+        xhr.onerror = () => { diag('upload: XHR network error'); reject(new Error('Network error during upload')); };
+        xhr.send(fd);
       });
-      const data = await resp.json();
-      if (data.error) throw new Error(data.error);
       return data.files; // [{ name, path, size }]
     }
 
@@ -2315,13 +2547,18 @@
       localStorage.setItem('termhub_vk_mode', mode);
       document.getElementById('vk-claude-keys').classList.toggle('hidden', mode !== 'claude');
       document.getElementById('vk-shell-keys').classList.toggle('hidden', mode !== 'shell');
+      document.getElementById('vk-setting-keys').classList.toggle('hidden', mode !== 'setting');
       document.getElementById('vk-mode-claude').classList.toggle('active', mode === 'claude');
       document.getElementById('vk-mode-shell').classList.toggle('active', mode === 'shell');
+      document.getElementById('vk-mode-setting').classList.toggle('active', mode === 'setting');
       updateModeLabel();
-      // Re-fit terminal after keyboard layout change
-      if (activeId && sessions[activeId]) {
-        setTimeout(() => fitAndKeepScroll(sessions[activeId]), 100);
-      }
+      // Different panels have different heights — re-apply the drawer translate (mobile, no
+      // reflow). Skip the fit in translate mode (avoids an off-by-one flash); desktop still fits.
+      requestAnimationFrame(() => {
+        if (window.visualViewport) handleViewportChange();
+        const translate = isMobileTouch() && getMobileLockedCols();
+        if (!translate && activeId && sessions[activeId]) setTimeout(() => fitAndKeepScroll(sessions[activeId]), 60);
+      });
     }
 
     // Apply saved mode on load
@@ -2378,7 +2615,15 @@
     function clampZoomIndex(i) {
       return Math.max(ZOOM_MIN_INDEX, Math.min(ZOOM_MAX_INDEX, i));
     }
-    let zoomIndex = clampZoomIndex(1);
+    const ZOOM_KEY = 'termhub_zoom_index';
+    function readZoomIndex() {
+      try {
+        const v = parseInt(localStorage.getItem(ZOOM_KEY), 10);
+        if (Number.isFinite(v)) return v;
+      } catch (_) {}
+      return 1; // default 11px
+    }
+    let zoomIndex = clampZoomIndex(readZoomIndex());
 
     function syncZoomButtons() {
       const down = document.getElementById('vk-zoom-down');
@@ -2390,15 +2635,29 @@
 
     function applyZoom() {
       zoomIndex = clampZoomIndex(zoomIndex);
+      try { localStorage.setItem(ZOOM_KEY, String(zoomIndex)); } catch (_) {}
       const size = ZOOM_LEVELS[zoomIndex];
       document.getElementById('vk-zoom-label').textContent = size + 'px';
       syncZoomButtons();
-      // Apply to all terminal sessions (skip file viewers)
+      // Clear the mobile cols lock: it only ever GROWS (never shrinks), so when the font gets
+      // BIGGER (needs FEWER cols) the stale lock keeps the old wider grid and text overflows
+      // until a manual Re-fit. A font change is an explicit intent to re-measure, so drop the
+      // lock and let the fit below recompute the correct (possibly smaller) column count.
+      try { clearMobileLockedGrid(); } catch (_) {}
+      // Apply the new font size to all terminals first, then fit on a later frame. xterm
+      // re-measures the character cell asynchronously after a fontSize change; fitting in the
+      // same tick uses the STALE cell size and computes the wrong column count. Deferring the
+      // fit lets the re-measure land first.
       for (const [id, s] of Object.entries(sessions)) {
         if (!s.terminal) continue;
         s.terminal.options.fontSize = size;
-        fitAndKeepScroll(s);
       }
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        for (const [id, s] of Object.entries(sessions)) {
+          if (!s.terminal) continue;
+          try { fitAndKeepScroll(s); } catch (_) {}
+        }
+      }));
     }
 
     document.getElementById('vk-zoom-down').addEventListener('click', (e) => {
@@ -2560,7 +2819,7 @@
         const url = `/api/terminal/${s.id}/scrollback?toLine=${s._oldestLoadedLine}&maxBytes=${1 * 1024 * 1024}`;
         const resp = await authFetchJson(url);
         if (!resp || !resp.data || resp.startLine >= s._oldestLoadedLine) return;
-        // Prepend to client history, update bounds.
+        // Prepend to client history, update bounds. Keep raw bytes verbatim.
         s._history = resp.data + (s._history || '');
         s._oldestLoadedLine = resp.startLine;
         s._firstLineIndex = resp.firstLineIndex;
@@ -2676,6 +2935,26 @@
       } catch (_) {}
     }
 
+    // Force the running app (a TUI like Claude Code) to repaint its CURRENT screen by nudging
+    // the PTY size, which raises SIGWINCH. Scrollback replay can't reconstruct a cursor-
+    // addressed TUI (its visible text lives in transient screen state, not linear scrollback),
+    // but the app redraws on resize — this automates the manual "resize to fix it" workaround.
+    function forcePtyRepaint(s) {
+      if (!s?.terminal || !s.ws || s.ws.readyState !== WebSocket.OPEN) return;
+      try {
+        const gridCols = s.terminal.cols, rows = s.terminal.rows;
+        if (!Number.isFinite(gridCols) || !Number.isFinite(rows) || rows < 2) return;
+        const cols = ptyColsForGrid(gridCols);
+        s.ws.send(JSON.stringify({ type: 'resize', cols, rows: rows - 1 }));
+        setTimeout(() => {
+          if (s.ws && s.ws.readyState === WebSocket.OPEN) {
+            s.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+            s._ptyGeomSig = `${cols}:${rows}`;
+          }
+        }, 120);
+      } catch (_) {}
+    }
+
     function setPtyColWrapMargin(next) {
       const n = Math.max(0, Math.min(PTY_COL_MARGIN_MAX, parseInt(next, 10) || 0));
       ptyColWrapMargin = n;
@@ -2728,6 +3007,16 @@
       const buf = s._wrBuf; s._wrBuf = '';
       s._wrLastFlush = performance.now();
       try { scrollAwareWrite(s, buf); } catch (_) {}
+    }
+
+    // Collapse long runs of pure-empty lines. Cursor-addressed TUIs (Claude Code) emit huge
+    // numbers of blank "\r\n" lines to scroll/reserve space while redrawing in place; replaying
+    // those into scrollback leaves a massive blank expanse above the content. Only fully-empty
+    // lines are squeezed — any line containing text OR an escape sequence is left untouched, so
+    // cursor-control bytes are preserved. (The live screen is repainted via SIGWINCH on connect.)
+    function collapseBlankRuns(data) {
+      if (!data || data.length < 4096) return data;
+      return data.replace(/(?:\r\n[ \t]*){6,}/g, '\r\n\r\n\r\n');
     }
 
     function throttledWrite(s, data) {
@@ -2869,6 +3158,11 @@
         const st = getComputedStyle(s.container);
         if (st.display === 'none') return;
         if ((s.container.clientWidth || 0) < 8 || (s.container.clientHeight || 0) < 8) return;
+        // In mobile locked-grid mode the layout is driven by handleViewportChange (translate),
+        // and the grid is intentionally fixed — container jitter from the keyboard/drawer/address
+        // bar must NOT re-fit (that's the whole point of the lock, and it caused an off-by-one
+        // row flash when opening the drawer). Let translate handle it.
+        if (isMobileTouch() && getMobileLockedCols()) return;
         clearTimeout(debTimer);
         debTimer = setTimeout(() => {
           debTimer = null;
@@ -2974,10 +3268,17 @@
       if (!s || !s.terminal || !s.fitAddon) return;
       const shouldSnap = !s._userScrolledUp && !isAlternateScreenTerminal(s.terminal);
       s._suppressScrollTrack = true;
+      const _bc = s.terminal.cols, _br = s.terminal.rows;
       if (!safeFit(s)) {
         s._suppressScrollTrack = false;
         scheduleFitBackoffRetries(s);
         return;
+      }
+      // Log only when the grid actually changed — that's a real reflow. A no-op fit (size
+      // already correct, e.g. a clean reopen) stays silent, so the diag shows whether opening
+      // forced a reflow.
+      if (s.terminal.cols !== _bc || s.terminal.rows !== _br) {
+        diag(`reflow(fit) id=${s.id} ${_bc}x${_br}→${s.terminal.cols}x${s.terminal.rows}`);
       }
       clearFitBackoffTimers(s);
       if (shouldSnap) {
@@ -2999,14 +3300,15 @@
     /** After open(), WebGL metrics can settle after fonts; re-fit so PTY cols match the real grid. */
     function scheduleInitialTerminalGeometryFix(s) {
       if (!s?.terminal || !s.fitAddon) return;
-      const run = () => {
-        try {
-          fitAndKeepScroll(s);
-        } catch (_) {}
-      };
-      requestAnimationFrame(() => requestAnimationFrame(run));
+      // Light fit only — resize is a no-op when the grid is already correct, so when the font
+      // size is persisted and we adopt the server's PTY winsize, opening causes NO visible
+      // reflow. We still fit once on fonts.ready: on a cold load the cell metrics change after
+      // the font applies, so a single corrective fit then is necessary (and only reflows if the
+      // column count actually changed). No font-toggle re-measure on open anymore.
+      const fit = () => { try { fitAndKeepScroll(s); } catch (_) {} };
+      requestAnimationFrame(() => requestAnimationFrame(fit));
       try {
-        if (document.fonts && document.fonts.ready) document.fonts.ready.then(run).catch(() => {});
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit).catch(() => {});
       } catch (_) {}
     }
 
@@ -3015,6 +3317,7 @@
     // argument runs after the final fit() completes.
     function reflowTerminal(s, callback) {
       if (!s || !s.terminal || !s.fitAddon) return;
+      diag(`reflow(toggle) id=${s?.id}`);
       const shouldSnap = !s._userScrolledUp && !isAlternateScreenTerminal(s.terminal);
       s._suppressScrollTrack = true;
       const origSize = s.terminal.options.fontSize;
@@ -3153,29 +3456,55 @@
       return { col, row };
     }
 
+    // Finger travel (in character-cell heights) required per ONE tmux wheel notch. Higher =
+    // slower scrolling. (Each notch itself scrolls a few lines inside tmux's copy-mode.)
+    // Adjustable from the Display modal; persisted in localStorage.
+    const ALT_SCROLL_KEY = 'termhub_alt_scroll_lpn';
+    function readAltScrollLpn() {
+      const v = parseFloat(localStorage.getItem(ALT_SCROLL_KEY));
+      return (Number.isFinite(v) && v >= 0.5 && v <= 8) ? v : 2.5;
+    }
+    let altScrollLinesPerNotch = readAltScrollLpn();
+    function setAltScrollLpn(n) {
+      altScrollLinesPerNotch = Math.max(0.5, Math.min(8, parseFloat(n) || 2.5));
+      try { localStorage.setItem(ALT_SCROLL_KEY, String(altScrollLinesPerNotch)); } catch (_) {}
+    }
+    // Touch-scroll direction inside full-screen apps (tmux/vim). Some prefer the flipped sense.
+    const ALT_SCROLL_INVERT_KEY = 'termhub_alt_scroll_invert';
+    let altScrollInvert = localStorage.getItem(ALT_SCROLL_INVERT_KEY) === '1';
+    function toggleAltScrollInvert() {
+      altScrollInvert = !altScrollInvert;
+      try { localStorage.setItem(ALT_SCROLL_INVERT_KEY, altScrollInvert ? '1' : '0'); } catch (_) {}
+      const btn = document.getElementById('termhub-altscroll-dir');
+      if (btn) btn.textContent = altScrollInvert ? 'Reverse' : 'Normal';
+    }
+    (function initAltScrollUI() {
+      const range = document.getElementById('termhub-altscroll-range');
+      const valEl = document.getElementById('termhub-altscroll-value');
+      if (range && valEl) {
+        range.value = String(altScrollLinesPerNotch);
+        valEl.textContent = String(altScrollLinesPerNotch);
+        range.addEventListener('input', () => { valEl.textContent = range.value; });
+        range.addEventListener('change', () => { setAltScrollLpn(range.value); });
+      }
+      const dirBtn = document.getElementById('termhub-altscroll-dir');
+      if (dirBtn) dirBtn.textContent = altScrollInvert ? 'Reverse' : 'Normal';
+    })();
+
     /**
      * iOS WebKit ignores synthetic WheelEvent for programs using the alternate screen (tmux, etc.).
-     * Send xterm SGR-extended wheel codes (buttons 64/65), which tmux handles when mouse mode is on.
+     * Send N xterm SGR-extended wheel codes (buttons 64=up / 65=down), which tmux handles when mouse
+     * mode is on. Callers decide N via a finger-travel accumulator so speed is frame-rate-independent.
      */
-    function sendSgrMouseWheelScrollToPty(term, container, fingerDeltaYpx, cx, cy) {
+    function sendWheelNotches(term, container, up, count, cx, cy) {
+      if (count < 1) return false;
       const s = findSessionForTerminal(term);
       if (!s?.ws || s.ws.readyState !== WebSocket.OPEN) return false;
-      if (!fingerDeltaYpx) return true;
-      const lh = (term.options.fontSize || 13) * 1.2;
-      let steps = Math.round(Math.abs(fingerDeltaYpx) / lh);
-      if (steps < 1) steps = 1;
-      steps = Math.min(steps, 24);
       const { col, row } = clientPointToTerminalCell(term, container, cx, cy);
-      const btn = fingerDeltaYpx > 0 ? 64 : 65;
+      const btn = up ? 64 : 65;
       let payload = '';
-      for (let i = 0; i < steps; i++) {
-        payload += `\x1b[<${btn};${col};${row}M`;
-      }
-      try {
-        s.ws.send(JSON.stringify({ type: 'input', data: payload }));
-      } catch (_) {
-        return false;
-      }
+      for (let i = 0; i < Math.min(count, 24); i++) payload += `\x1b[<${btn};${col};${row}M`;
+      try { s.ws.send(JSON.stringify({ type: 'input', data: payload })); } catch (_) { return false; }
       return true;
     }
 
@@ -3197,6 +3526,9 @@
       let inertiaRAF = 0;
       let wheelTouchCx = 0;
       let wheelTouchCy = 0;
+      let _diagLogged = false;   // diag: log the gesture once
+      let _sgrSent = 0;          // diag: count SGR wheel events forwarded to PTY this gesture
+      let wheelAccum = 0;        // accumulated finger px → drained into wheel notches (alt screen)
 
       container.addEventListener('touchstart', (e) => {
         if (e.touches.length === 1) {
@@ -3209,6 +3541,9 @@
           lastTime = Date.now();
           velocityY = 0;
           scrolling = false;
+          _diagLogged = false;
+          _sgrSent = 0;
+          wheelAccum = 0;
         }
       }, { passive: true });
 
@@ -3231,6 +3566,10 @@
         }
 
         if (scrolling) {
+          if (!_diagLogged) {
+            _diagLogged = true;
+            diag(`touchscroll: alt=${isAlternateScreenTerminal(term)} bufType=${(()=>{try{return term.buffer.active.type}catch(_){return '?'}})()}`);
+          }
           // Track velocity (exponential moving average for smoothness)
           const instantV = deltaFromLast / dt;
           velocityY = velocityY * 0.4 + instantV * 0.6;
@@ -3238,10 +3577,17 @@
           const lineHeight = (term.options.fontSize || 13) * 1.2;
           /* Alternate buffer: bypass xterm viewport + fake wheel (broken on Safari); PTY sees real mouse escapes. */
           if (isAlternateScreenTerminal(term)) {
-            if (Math.abs(deltaFromLast) >= 0.25) {
-              sendSgrMouseWheelScrollToPty(term, container, deltaFromLast, cx, cy);
-              lastY = currentY;
+            // Accumulate finger travel and emit ONE wheel notch per ALT_SCROLL_LINES_PER_NOTCH
+            // line-heights — decoupled from the (high) touchmove rate, so it isn't too fast.
+            wheelAccum += deltaFromLast;
+            const notchPx = lineHeight * altScrollLinesPerNotch;
+            let notches = Math.trunc(Math.abs(wheelAccum) / notchPx);
+            if (notches > 0) {
+              const up = (wheelAccum > 0) !== altScrollInvert;
+              if (sendWheelNotches(term, container, up, notches, cx, cy)) _sgrSent += notches;
+              wheelAccum -= (wheelAccum > 0 ? 1 : -1) * notches * notchPx;
             }
+            lastY = currentY;
             lastTime = now;
             e.preventDefault();
             return;
@@ -3258,6 +3604,7 @@
       }, { passive: false });
 
       container.addEventListener('touchend', () => {
+        if (_diagLogged) diag(`touchscroll end: gesture=${scrolling} sgrSent=${_sgrSent}`);
         if (!scrolling) return;
         scrolling = false;
 
@@ -3280,13 +3627,14 @@
           const lines = Math.trunc(residual / lineHeight);
           if (lines !== 0) {
             if (isAlternateScreenTerminal(term)) {
-              sendSgrMouseWheelScrollToPty(
-                term,
-                container,
-                Math.sign(lines) * Math.abs(lines) * lineHeight,
-                wheelTouchCx,
-                wheelTouchCy
-              );
+              wheelAccum += lines * lineHeight;
+              const notchPx = lineHeight * altScrollLinesPerNotch;
+              const notches = Math.trunc(Math.abs(wheelAccum) / notchPx);
+              if (notches > 0) {
+                const up = (wheelAccum > 0) !== altScrollInvert;
+                sendWheelNotches(term, container, up, notches, wheelTouchCx, wheelTouchCy);
+                wheelAccum -= (wheelAccum > 0 ? 1 : -1) * notches * notchPx;
+              }
             } else {
               term.scrollLines(lines);
             }
@@ -3747,8 +4095,10 @@
     // ---- Reconnect to existing terminals on page load ----
     async function reconnectExisting() {
       try {
+        diag('reconnectExisting: GET /api/terminals');
         const resp = await authFetch('/api/terminals');
         const list = await resp.json();
+        diag(`/api/terminals → ${resp.status}, terminals=${list.length}`);
 
         if (list.length === 0) return;
 
@@ -3849,12 +4199,17 @@
       }
 
       const token = getToken();
-      const ws = new WebSocket(`${getWsUrl()}?id=${id}&token=${token}`);
+      diag(`WS connecting id=${id} token=${token ? token.slice(0, 6) + '…' : 'NONE'} master=${document.cookie.includes('master_token=') ? 'yes' : 'no'}`);
+      // Initial scrollback tail size is chosen by the FRONTEND and sent to the server, so it
+      // can be tuned here without a server change. Server clamps it to a safe range.
+      const ws = new WebSocket(`${getWsUrl()}?id=${id}&token=${token}&tail=${INITIAL_TAIL_BYTES}`);
       s.ws = ws;
       s._ptyGeomSig = null;
       s._kicked = false;
+      s._diagFirstOut = false;
 
       ws.onopen = () => {
+        diag(`WS OPEN id=${id}`);
         s.tab.classList.remove('tab-disconnected');
         s.container.classList.remove('terminal-disconnected');
         hideReconnectOverlay(id);
@@ -3870,6 +4225,7 @@
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
+            if (!s._diagFirstOut) { s._diagFirstOut = true; diag(`WS first-output id=${id} bytes=${(msg.data || '').length}`); }
             throttledWrite(s, msg.data);
             // Track live output in client-side history so re-render on backfill stays consistent.
             if (typeof s._history === 'string') {
@@ -3884,30 +4240,60 @@
               if (s.id === activeId) updateHistorySizeIndicator();
             }
           } else if (msg.type === 'history') {
-            s._history = msg.data || '';
+            diag(`WS history id=${id} bytes=${(msg.data || '').length}`);
+            // Write the raw stream verbatim — a TUI's screen is reconstructed by replaying its
+            // exact bytes (cursor moves, \r, blank lines included). Do NOT alter it.
+            const _d = msg.data || '';
+            s._history = _d;
             s._firstLineIndex = msg.firstLineIndex || 0;
             s._oldestLoadedLine = msg.startLine || 0;
             s._endLine = msg.endLine || 0;
+            // Adopt the PTY's existing winsize so the replayed scrollback is wrapped at the same
+            // width it was produced at, instead of our own (possibly not-yet-stable) fit. The
+            // initial-geometry re-measure converges this to the real viewport shortly after.
+            if (msg.cols && msg.rows && (s.terminal.cols !== msg.cols || s.terminal.rows !== msg.rows)) {
+              try { s.terminal.resize(msg.cols, msg.rows); } catch (_) {}
+            }
             // After any history payload (initial load / reconnect / mobile resume),
             // require a fresh user gesture before the load-older confirm can fire again.
             s._userGestureSinceReset = false;
             s._historyPromptPending = false;
-            throttledWrite(s, msg.data || '');
-            if (s.id === activeId) updateHistorySizeIndicator();
-            // After reconnect buffer replay — avoid heavy reflowTerminal (see afterReconnectReplay)
-            if (s._reconnecting) {
-              s._reconnecting = false;
-              setTimeout(() => {
-                try {
-                  flushPendingWrite(s);
-                  afterReconnectReplay(s);
-                } catch (_) {}
-              }, 150);
-            }
+            // Write the history, then repaint+snap ONLY after xterm finishes parsing it
+            // (via the write callback). A fixed timer raced the async parse, leaving the
+            // screen intermittently blank until a manual reflow — drive it off completion.
+            flushPendingWrite(s); // drain any throttle buffer from earlier output
+            const wasReconnecting = s._reconnecting;
+            s._reconnecting = false;
+            // Alt-screen sessions aren't cached, so the history carries no ?1049h and tmux's
+            // SIGWINCH redraw won't re-send it — the fresh xterm would stay on the NORMAL buffer
+            // (so touch-scroll wouldn't forward to tmux). Switch xterm into the alternate buffer
+            // ourselves to match the server/app state, then the redraw paints into it.
+            const writeData = (msg.altScreen ? '\x1b[?1049h' : '') + _d;
+            s.terminal.write(writeData, () => {
+              if (s.id === activeId) updateHistorySizeIndicator();
+              try {
+                const t = s.terminal, b = t.buffer.active;
+                diag(`history rendered id=${id}: bufLines=${b.length} baseY=${b.baseY} viewportY=${b.viewportY} cursorY=${b.cursorY} rows=${t.rows} cols=${t.cols}`);
+                if (wasReconnecting) afterReconnectReplay(s); // fit + full refresh + snap
+                else snapToBottom(s);
+                // Alternate screen (tmux/vim/…): the scrollback wasn't cached, so the replayed
+                // history is only the pre-alt content. Nudge the PTY (SIGWINCH) so the app
+                // repaints its CURRENT screen — we rely entirely on the app's own redraw.
+                if (msg.altScreen) {
+                  diag(`altScreen reconnect id=${id} → SIGWINCH repaint`);
+                  forcePtyRepaint(s);
+                }
+                requestAnimationFrame(() => {
+                  const b2 = t.buffer.active;
+                  diag(`post-replay id=${id}: baseY=${b2.baseY} viewportY=${b2.viewportY} rows=${t.rows} cols=${t.cols}`);
+                });
+              } catch (_) {}
+            });
           } else if (msg.type === 'exit') {
             flushPendingWrite(s);
             scrollAwareWrite(s, `\r\n\x1b[31m[Process exited with code ${msg.code}]\x1b[0m\r\n`);
           } else if (msg.type === 'error') {
+            diag(`WS server-error id=${id}: ${msg.message}`);
             flushPendingWrite(s);
             scrollAwareWrite(s, `\r\n\x1b[31m[Error: ${msg.message}]\x1b[0m\r\n`);
           } else if (msg.type === 'kicked') {
@@ -3919,7 +4305,8 @@
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
+        diag(`WS CLOSE id=${id} code=${ev.code}${s._kicked ? ' (kicked)' : s._closing ? ' (intentional)' : ' → retry in 3s'}`);
         if (s._kicked || s._closing) return; // don't reconnect if kicked or intentionally closed
         if (s.ws !== ws) return; // replaced by a newer socket (reconnect race)
         s.tab.classList.add('tab-disconnected');
@@ -3933,7 +4320,7 @@
         }, 3000);
       };
 
-      ws.onerror = () => {};
+      ws.onerror = () => { diag(`WS ERROR id=${id}`); };
     }
 
     // ---- Reconnect overlay (per-terminal) ----
@@ -4085,6 +4472,18 @@
 
     let _vvLastH = null;
 
+    // Height the function drawer (expanded keypad) currently occupies, on mobile only. Used to
+    // translate the view up instead of shrinking the terminal — so opening it causes NO reflow.
+    function drawerOpenHeight() {
+      if (!isMobileTouch()) return 0;
+      const d = document.getElementById('vk-expanded');
+      if (!d || d.classList.contains('hidden')) return 0;
+      const cs = getComputedStyle(d);
+      // Include margins so #app is grown by the drawer's FULL footprint — otherwise the terminal
+      // area is off by a couple px (sub-row), which used to trip a re-fit.
+      return (d.offsetHeight || 0) + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+    }
+
     function handleViewportChange() {
       const vv = window.visualViewport;
       if (!vv) return;
@@ -4096,10 +4495,14 @@
 
       // Locked-grid mode (mobile, dims already captured): keep #app at full size, translate up so
       // the bottom of the grid sits just above the soft keyboard. PTY dims never change → no SIGWINCH.
+      // The function drawer is folded into the same translate (keypad behaves like the keyboard):
+      // make #app taller by the drawer height so the terminal area keeps its rows, then shift up.
       if (isMobileTouch() && getMobileLockedCols()) {
+        const dH = drawerOpenHeight();
+        const up = (kbHeight > 80 ? kbHeight : 0) + dH;
         app.style.top = '0px';
-        app.style.height = fullH + 'px';
-        app.style.transform = kbHeight > 80 ? `translateY(${-kbHeight}px)` : '';
+        app.style.height = (fullH + dH) + 'px';
+        app.style.transform = up > 0 ? `translateY(${-up}px)` : '';
         return;
       }
 
@@ -4152,6 +4555,7 @@
     });
 
     // Auto-reconnect on page load
+    diag('page init (DOM ready, starting auto-reconnect)');
     loadGroupInfo();
     fetchPlatform();
     reconnectExisting();
