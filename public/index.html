@@ -3153,12 +3153,15 @@
         if (!s.terminal) return;
         const st = getComputedStyle(s.container);
         if (st.display === 'none') return;
-        if ((s.container.clientWidth || 0) < 8 || (s.container.clientHeight || 0) < 8) return;
-        // In mobile locked-grid mode the layout is driven by handleViewportChange (translate),
-        // and the grid is intentionally fixed — container jitter from the keyboard/drawer/address
-        // bar must NOT re-fit (that's the whole point of the lock, and it caused an off-by-one
-        // row flash when opening the drawer). Let translate handle it.
-        if (isMobileTouch() && getMobileLockedCols()) return;
+        const w = s.container.clientWidth || 0;
+        if (w < 8 || (s.container.clientHeight || 0) < 8) return;
+        // In mobile locked-grid mode, height-only container jitter (keyboard / drawer / address
+        // bar) must NOT re-fit — that's the point of the lock and it caused an off-by-one row
+        // flash; translate handles those. BUT a WIDTH change is a real resize (orientation flip),
+        // which must re-fit so rows/cols sync to the new viewport — so skip only when width is
+        // unchanged. (Without this, rotating landscape→portrait left rows stuck at the old height.)
+        if (isMobileTouch() && getMobileLockedCols() && w === s._lastObsWidth) return;
+        s._lastObsWidth = w;
         clearTimeout(debTimer);
         debTimer = setTimeout(() => {
           debTimer = null;
