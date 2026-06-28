@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "test": "node test/lineBuffer.test.js",
     "start-tunnel": "bash -c 'cd /c/Users/TRS001/Documents/workspace/WebTunnelHub && ./hub-unregister.sh --name webterm; ./hub-managed-tunnel.sh --name webterm --note sisjdbhxb --port 9091'",
     "cleanserver": "powershell -NoProfile -Command \"Get-NetTCPConnection -LocalPort 9091 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue; Write-Host ('Killed PID ' + $_) }\""
   },
