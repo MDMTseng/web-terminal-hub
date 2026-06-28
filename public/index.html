@@ -3220,15 +3220,16 @@
     // reflows the entire scrollback to very few columns — irreversible damage.
     // Guard: check proposeDimensions() BEFORE applying, reject if cols would
     // drop below an absolute minimum OR below half the last known good width.
-    function safeFit(s) {
+    function safeFit(s, force) {
       if (!s || !s.terminal || !s.fitAddon) return false;
       try {
         const dims = s.fitAddon.proposeDimensions();
         if (!dims || dims.cols < MIN_FIT_COLS) return false;
-        // Reject if cols would shrink to less than half the current width
-        // (transient layout glitch during iOS app-switch / keyboard animation)
+        // Reject if cols would shrink to less than half the current width (transient layout
+        // glitch during iOS app-switch / keyboard animation). `force` skips this — used on a real
+        // orientation flip, where landscape→portrait legitimately more than halves the columns.
         const curCols = s.terminal.cols;
-        if (curCols >= MIN_FIT_COLS && dims.cols < curCols * 0.5) return false;
+        if (!force && curCols >= MIN_FIT_COLS && dims.cols < curCols * 0.5) return false;
         // Mobile: lock COLS only (per-orientation, self-healing grow) so keyboard / address-bar
         // jitter can't reflow text. ROWS always follows the current proposed value so the cursor
         // is never clipped when the drawer expands the keyboard panel. Soft keyboard never
@@ -3263,11 +3264,11 @@
     // After fit(), xterm reflows and may reset scroll to top.
     // If user was at bottom (not manually scrolled up), snap back.
     // Never auto snap on the alternate screen — the app owns the viewport (TUI redraws).
-    function fitAndKeepScroll(s) {
+    function fitAndKeepScroll(s, force) {
       if (!s || !s.terminal || !s.fitAddon) return;
       const shouldSnap = !s._userScrolledUp && !isAlternateScreenTerminal(s.terminal);
       s._suppressScrollTrack = true;
-      if (!safeFit(s)) {
+      if (!safeFit(s, force)) {
         s._suppressScrollTrack = false;
         scheduleFitBackoffRetries(s);
         return;
@@ -4520,14 +4521,22 @@
 
     window.addEventListener('orientationchange', () => {
       _vvLastH = null;
-      setTimeout(() => {
-        // Orientation flip is a real resize: drop the per-orientation cols lock so safeFit
-        // re-measures fresh, then fit so rows/cols sync to the new viewport (the locked-grid
-        // guard otherwise leaves rows stuck at the previous orientation's height).
+      // Orientation flip is a real resize. Re-measure fresh at two delays to catch the rotation
+      // animation settling. Each pass: drop the per-orientation cols lock, then FORCE-fit (bypass
+      // the narrow-shrink guard, which would otherwise reject landscape→portrait and leave rows
+      // stuck) — the forced fit always succeeds so safeFit re-locks the grid (without this the
+      // lock could stay null and the soft keyboard would stop translating the view up).
+      const orientFit = () => {
         try { clearMobileLockedGrid(); } catch (_) {}
-        if (activeId && sessions[activeId]) fitAndKeepScroll(sessions[activeId]);
+        if (activeId && sessions[activeId]) {
+          fitAndKeepScroll(sessions[activeId], true);
+          const t = sessions[activeId].terminal;
+          diag(`orient fit: ${t.cols}x${t.rows} lockedCols=${getMobileLockedCols()}`);
+        }
         if (window.visualViewport) handleViewportChange();
-      }, 200);
+      };
+      setTimeout(orientFit, 250);
+      setTimeout(orientFit, 550);
     });
 
     // Auto-reconnect on page load
