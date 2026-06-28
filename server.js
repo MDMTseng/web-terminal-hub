@@ -6,6 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 const { spawnSync } = require('child_process');
+const { createLineBuffer } = require('./lib/lineBuffer');
 
 
 // ========== Logging System ==========
@@ -1119,11 +1120,15 @@ if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 // Accept raw binary via multipart — we parse manually to avoid deps
 app.post('/api/upload-images', (req, res) => {
   const contentType = req.headers['content-type'] || '';
+  // Diagnostic: did the client even declare a body? (iOS upload arrives with bodyBytes=0)
+  log.info('upload', `incoming: ct="${contentType}" len=${req.headers['content-length'] || '(none)'} ` +
+    `te=${req.headers['transfer-encoding'] || '(none)'} expect=${req.headers['expect'] || '(none)'} httpVer=${req.httpVersion}`);
   if (!contentType.startsWith('multipart/form-data')) {
     return res.status(400).json({ error: 'multipart/form-data required' });
   }
 
-  const boundary = contentType.split('boundary=')[1];
+  // boundary may be quoted ("...") and/or followed by other params (; charset=...).
+  const boundary = (contentType.split('boundary=')[1] || '').split(';')[0].trim().replace(/^"|"$/g, '');
   if (!boundary) return res.status(400).json({ error: 'No boundary' });
 
   const chunks = [];
@@ -1133,14 +1138,20 @@ app.post('/api/upload-images', (req, res) => {
       const body = Buffer.concat(chunks);
       const parts = parseMultipart(body, boundary);
       const saved = [];
+      const allowed = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
 
       for (const part of parts) {
         if (!part.filename) continue;
 
-        // Sanitize filename, keep extension
-        const ext = path.extname(part.filename).toLowerCase() || '.png';
-        const allowed = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
-        if (!allowed.includes(ext)) continue;
+        // Accept by extension OR by the part's declared image/* Content-Type (covers odd /
+        // missing extensions). Map unknown-but-image types to a sane extension.
+        let ext = path.extname(part.filename).toLowerCase();
+        const ctImage = /^image\//i.test(part.contentType || '');
+        if (!allowed.includes(ext)) {
+          if (!ctImage) continue;
+          const fromCt = '.' + (part.contentType.split('/')[1] || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
+          ext = allowed.includes(fromCt) ? fromCt : '.png';
+        }
 
         const ts = Date.now();
         const rand = crypto.randomBytes(4).toString('hex');
@@ -1153,6 +1164,12 @@ app.post('/api/upload-images', (req, res) => {
       }
 
       if (saved.length === 0) {
+        // Diagnostic: show exactly what arrived so we can tell an empty body from a boundary
+        // mismatch from a header-format issue.
+        log.warn('upload', `No valid image parts. ct="${contentType}" boundary="${boundary}" ` +
+          `bodyBytes=${body.length} parts=${parts.length} ` +
+          `partInfo=${JSON.stringify(parts.map(p => ({ filename: p.filename, field: p.fieldName, ct: p.contentType, dataLen: p.data && p.data.length })))} ` +
+          `bodyHead=${JSON.stringify(body.slice(0, 220).toString('latin1'))}`);
         return res.status(400).json({ error: 'No valid image files found' });
       }
 
@@ -1233,31 +1250,44 @@ function parseMultipart(body, boundary) {
     if (idx === -1) break;
 
     if (start > 0) {
-      // Extract part between previous boundary and this one
-      // Skip \r\n after boundary, and \r\n before next boundary
-      let partStart = start;
-      let partEnd = idx - 2; // remove trailing \r\n
-      if (partEnd > partStart) {
-        const partBuf = body.slice(partStart, partEnd);
-        const headerEnd = partBuf.indexOf('\r\n\r\n');
+      // Extract part between previous boundary and this one. Line breaks may be CRLF or
+      // bare LF — some paths (proxies / clients) normalize \r\n → \n in the body, and a
+      // strict \r\n-only parser then finds no header separator and silently drops the part.
+      let partEnd = idx;
+      if (partEnd >= start + 2 && body[partEnd - 2] === 0x0d && body[partEnd - 1] === 0x0a) partEnd -= 2;
+      else if (partEnd >= start + 1 && body[partEnd - 1] === 0x0a) partEnd -= 1;
+      if (partEnd > start) {
+        const partBuf = body.slice(start, partEnd);
+        // Header/body separator: a blank line — CRLF (\r\n\r\n) or LF (\n\n).
+        let headerEnd = partBuf.indexOf('\r\n\r\n');
+        let sepLen = 4;
+        if (headerEnd === -1) { headerEnd = partBuf.indexOf('\n\n'); sepLen = 2; }
         if (headerEnd !== -1) {
           const headerStr = partBuf.slice(0, headerEnd).toString('utf-8');
-          const data = partBuf.slice(headerEnd + 4);
+          const data = partBuf.slice(headerEnd + sepLen);
 
-          // Parse headers
-          const filenameMatch = headerStr.match(/filename="([^"]+)"/);
-          const filename = filenameMatch ? filenameMatch[1] : null;
-          const nameMatch = headerStr.match(/name="([^"]+)"/);
-          const fieldName = nameMatch ? nameMatch[1] : null;
+          // Parse headers. Accept quoted or unquoted filename/name (some clients omit quotes),
+          // and RFC 5987 filename*=. Capture the part's Content-Type for validation fallback.
+          const fnMatch = headerStr.match(/filename\*?=(?:"([^"]*)"|([^;\r\n]+))/i);
+          let filename = fnMatch ? (fnMatch[1] !== undefined ? fnMatch[1] : fnMatch[2].trim()) : null;
+          if (filename && /^[^']*''/.test(filename)) {
+            // RFC 5987: "UTF-8''na%20me.png" → decode the value after the second quote
+            try { filename = decodeURIComponent(filename.replace(/^[^']*''/, '')); } catch (_) {}
+          }
+          const nameMatch = headerStr.match(/(?:^|;|\s)name=(?:"([^"]*)"|([^;\r\n]+))/i);
+          const fieldName = nameMatch ? (nameMatch[1] !== undefined ? nameMatch[1] : nameMatch[2].trim()) : null;
+          const ctMatch = headerStr.match(/content-type:\s*([^\r\n]+)/i);
+          const partContentType = ctMatch ? ctMatch[1].trim() : null;
 
-          parts.push({ headers: headerStr, filename, fieldName, data });
+          parts.push({ headers: headerStr, filename, fieldName, contentType: partContentType, data });
         }
       }
     }
 
     start = idx + sep.length;
-    // Skip \r\n after boundary
+    // Skip the line break after the boundary (\r\n or bare \n).
     if (body[start] === 0x0d && body[start + 1] === 0x0a) start += 2;
+    else if (body[start] === 0x0a) start += 1;
     // Check for -- (end marker)
     if (body[start] === 0x2d && body[start + 1] === 0x2d) break;
   }
@@ -1320,97 +1350,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ========== Terminal state (persistent, per-group) ==========
 const terminals = new Map(); // id -> { pty, shell, created, clients, getBuffer, shellLabel, group }
 
-// ========== ANSI-aware line buffer ==========
-// Splits incoming pty data into "lines" at \n boundaries that are NOT inside
-// an ANSI escape sequence. Each line keeps its raw bytes (escapes included)
-// so xterm can replay them verbatim. Oldest lines are trimmed when totalBytes
-// exceeds MAX_BYTES. firstLineIndex is the absolute index of lines[0] within
-// the full session history (monotonic, never decreases), giving clients a
-// stable cursor for fetching older chunks.
-function createLineBuffer(maxBytes) {
-  return {
-    lines: [],            // [{ data: string, bytes: number }]
-    pending: '',          // partial line not yet terminated
-    escState: 0,          // 0=normal 1=just saw ESC 2=CSI 3=OSC 4=other-short
-    totalBytes: 0,
-    firstLineIndex: 0,
-    maxBytes,
-    append(chunk) {
-      // Walk chunk, track ANSI state, split on \n when escState === 0.
-      let start = 0;
-      for (let i = 0; i < chunk.length; i++) {
-        const c = chunk.charCodeAt(i);
-        switch (this.escState) {
-          case 0:
-            if (c === 0x1b) { this.escState = 1; }
-            else if (c === 0x0a) {
-              // safe newline: flush pending + current segment as one line
-              const lineData = this.pending + chunk.slice(start, i + 1);
-              this.pending = '';
-              start = i + 1;
-              this.lines.push({ data: lineData, bytes: lineData.length });
-              this.totalBytes += lineData.length;
-            }
-            break;
-          case 1: // just saw ESC
-            if (c === 0x5b) this.escState = 2;          // [ → CSI
-            else if (c === 0x5d) this.escState = 3;     // ] → OSC
-            else if (c === 0x50 || c === 0x58 || c === 0x5e || c === 0x5f) this.escState = 3; // DCS/SOS/PM/APC -> string term
-            else this.escState = 0;                     // short 2-byte escape; consumed
-            break;
-          case 2: // CSI: parameters then final byte 0x40–0x7e
-            if (c >= 0x40 && c <= 0x7e) this.escState = 0;
-            break;
-          case 3: // OSC/string: ends at BEL (0x07) or ESC \\ (0x1b 0x5c)
-            if (c === 0x07) this.escState = 0;
-            else if (c === 0x1b) this.escState = 5;     // expect \\
-            break;
-          case 5:
-            this.escState = (c === 0x5c) ? 0 : 0;       // either way exit string
-            break;
-        }
-      }
-      // tail: anything after last newline (or whole chunk if no newline) goes to pending
-      if (start < chunk.length) this.pending += chunk.slice(start);
-
-      // trim oldest while over budget
-      while (this.totalBytes > this.maxBytes && this.lines.length > 1) {
-        const dropped = this.lines.shift();
-        this.totalBytes -= dropped.bytes;
-        this.firstLineIndex++;
-      }
-    },
-    // Snapshot of all stored lines (does NOT include pending tail).
-    snapshot() {
-      return {
-        firstLineIndex: this.firstLineIndex,
-        lines: this.lines,
-        pending: this.pending,
-      };
-    },
-    // Return lines [fromAbs, fromAbs+count) clamped to what's available.
-    sliceAbs(fromAbs, count) {
-      const localFrom = Math.max(0, fromAbs - this.firstLineIndex);
-      const localTo = Math.min(this.lines.length, localFrom + count);
-      return this.lines.slice(localFrom, localTo);
-    },
-    // Tail lines totalling up to `targetBytes`, plus pending. Returns {startLine, lines, pending}.
-    tailByBytes(targetBytes) {
-      let acc = this.pending.length;
-      let i = this.lines.length;
-      while (i > 0 && acc < targetBytes) {
-        i--;
-        acc += this.lines[i].bytes;
-      }
-      return {
-        startLine: this.firstLineIndex + i,
-        endLine: this.firstLineIndex + this.lines.length,
-        lines: this.lines.slice(i),
-        pending: this.pending,
-      };
-    },
-  };
-}
+// ANSI-aware scrollback line buffer lives in ./lib/lineBuffer (createLineBuffer),
+// extracted for unit testing (test/lineBuffer.test.js).
 let nextId = 1;
 
 function getTerminalsForGroup(groupName) {
@@ -1554,7 +1495,9 @@ app.post('/api/terminal/new', async (req, res) => {
       lineBuf,
       created: new Date().toISOString(),
       clients: new Set(),
-      group
+      group,
+      cols, rows, // last known PTY winsize — reconnecting clients adopt this so replayed
+                  // scrollback matches the width it was wrapped at (avoids overflow on reopen).
     };
 
     ptyProc.onData((data) => {
@@ -1592,6 +1535,7 @@ app.post('/api/terminal/:id/resize', async (req, res) => {
   const cols = parseInt(req.body.cols) || 120;
   const rows = parseInt(req.body.rows) || 40;
   info.pty.resize(cols, rows);
+  info.cols = cols; info.rows = rows;
   res.json({ ok: true, cols, rows });
 });
 
@@ -1665,7 +1609,23 @@ function cleanupTerminal(id) {
 // ========== Server + WebSocket ==========
 
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ noServer: true, maxPayload: 5 * 1024 * 1024 });
+// permessage-deflate: history + output are ANSI text and compress ~5-10x, which is the
+// biggest lever for clients on a slow last-mile link (mobile/cellular through the tunnel).
+// Browsers negotiate it automatically — no client change needed.
+//  - threshold 1024: don't waste CPU compressing tiny frames (single-keystroke echoes).
+//  - noContextTakeover (both sides): bound per-connection zlib memory; the large history
+//    message still compresses fully on its own, so we lose little on what matters.
+const wss = new WebSocket.Server({
+  noServer: true,
+  maxPayload: 5 * 1024 * 1024,
+  perMessageDeflate: {
+    threshold: 1024,
+    zlibDeflateOptions: { level: 6 },
+    serverNoContextTakeover: true,
+    clientNoContextTakeover: true,
+    concurrencyLimit: 10,
+  },
+});
 
 // WebSocket upgrade — validate master token + group token + group isolation
 server.on('upgrade', (req, socket, head) => {
@@ -1729,15 +1689,27 @@ wss.on('connection', (ws, req) => {
   log.info('ws', `Client connected to terminal ${id} (group: ${ws._group})`);
   info.clients.add(ws);
 
-  // Send tail of scrollback (~1MB). Client uses lineRange to fetch older chunks on demand.
-  const INITIAL_TAIL_BYTES = 1 * 1024 * 1024;
+  // Send a SMALL tail of scrollback for instant first paint. Older lines load on demand via
+  // /api/terminal/:id/scrollback when the user scrolls up. The tail SIZE is chosen by the
+  // frontend (?tail= on the WS URL) so it can be tuned client-side without a server change;
+  // we clamp it to a safe range. WS permessage-deflate compresses the tail heavily, so a
+  // larger value is cheap on the wire.
+  const DEFAULT_TAIL = parseInt(process.env.HUB_INITIAL_TAIL_BYTES, 10) || 256 * 1024;
+  const reqTail = parseInt(url.searchParams.get('tail'), 10);
+  const INITIAL_TAIL_BYTES = Math.min(20 * 1024 * 1024, Math.max(4096, Number.isFinite(reqTail) ? reqTail : DEFAULT_TAIL));
   const tail = info.lineBuf.tailByBytes(INITIAL_TAIL_BYTES);
   let initialData = '';
   for (const ln of tail.lines) initialData += ln.data;
   initialData += tail.pending;
+  log.info('ws', `Sending history to terminal ${id}: ${initialData.length} bytes (lines ${tail.startLine}-${tail.endLine})`);
   ws.send(JSON.stringify({
     type: 'history',
     data: initialData,
+    cols: info.cols,
+    rows: info.rows,
+    // On the alternate screen (tmux/vim/…) the scrollback isn't cached — tell the client so it
+    // nudges the app (SIGWINCH) to repaint the current screen instead of relying on replay.
+    altScreen: info.lineBuf.altScreen,
     firstLineIndex: info.lineBuf.firstLineIndex,
     startLine: tail.startLine,
     endLine: tail.endLine,
@@ -1759,6 +1731,7 @@ wss.on('connection', (ws, req) => {
           break;
         case 'resize':
           info.pty.resize(parsed.cols, parsed.rows);
+          info.cols = parsed.cols; info.rows = parsed.rows;
           break;
       }
     } catch (err) {
