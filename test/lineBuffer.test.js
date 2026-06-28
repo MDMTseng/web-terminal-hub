@@ -103,5 +103,15 @@ test('handles ?47h / ?1047h alternate-screen variants', () => {
   b.append('\x1b[?1047l'); assert.strictEqual(b.altScreen, false);
 });
 
+test('flushes pending as a pseudo-line when it grows past the cap (no-newline flood)', () => {
+  const b = createLineBuffer(20 * MB);
+  b.append('x'.repeat(300 * 1024)); // 300KB with no \n, not alt-screen
+  // Pending was flushed into lines so totalBytes accounting can trim it; nothing stuck in pending.
+  assert.ok(b.pending.length <= 256 * 1024, `pending=${b.pending.length} not flushed`);
+  assert.ok(b.lines.length >= 1, 'flushed pseudo-line present');
+  const text = b.lines.map(l => l.data).join('') + b.pending;
+  assert.strictEqual(text.length, 300 * 1024, 'bytes preserved verbatim across the flush');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
