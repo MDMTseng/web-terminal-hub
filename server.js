@@ -1120,9 +1120,6 @@ if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 // Accept raw binary via multipart — we parse manually to avoid deps
 app.post('/api/upload-images', (req, res) => {
   const contentType = req.headers['content-type'] || '';
-  // Diagnostic: did the client even declare a body? (iOS upload arrives with bodyBytes=0)
-  log.info('upload', `incoming: ct="${contentType}" len=${req.headers['content-length'] || '(none)'} ` +
-    `te=${req.headers['transfer-encoding'] || '(none)'} expect=${req.headers['expect'] || '(none)'} httpVer=${req.httpVersion}`);
   if (!contentType.startsWith('multipart/form-data')) {
     return res.status(400).json({ error: 'multipart/form-data required' });
   }

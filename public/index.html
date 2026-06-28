@@ -2132,8 +2132,7 @@
     function handleImageSelect(input) {
       const files = Array.from(input.files || []);
       for (const f of files) {
-        diag(`image select: name="${f.name}" type="${f.type || '(empty)'}" size=${f.size}`);
-        if (!looksLikeImage(f)) { diag(`  skipped (not an image): ${f.name}`); continue; }
+        if (!looksLikeImage(f)) continue;
         const url = URL.createObjectURL(f);
         pendingImages.push({ file: f, previewUrl: url });
       }
@@ -2211,7 +2210,6 @@
       if (SERVER_IMAGE_EXTS.includes(imgExt(file.name))) {
         return { blob: file, filename: file.name };
       }
-      diag(`transcoding ${file.name || '(unnamed)'} (${file.type || 'no type'}) → JPEG`);
       const blob = await transcodeToJpeg(file);
       const base = (file.name || 'image').replace(/\.[^.]*$/, '') || 'image';
       return { blob, filename: `${base}.jpg` };
@@ -2230,7 +2228,6 @@
         try {
           ({ blob, filename } = await toUploadableImage(img.file));
         } catch (e) {
-          diag(`image prep failed for ${img.file.name}: ${e.message}`);
           throw new Error(`Could not process "${img.file.name || 'image'}": ${e.message}`);
         }
         // Read bytes into memory and upload a concrete Blob. An iOS photo-picker File reference
@@ -2240,10 +2237,8 @@
         try {
           bytes = await blob.arrayBuffer();
         } catch (e) {
-          diag(`arrayBuffer read failed for ${filename}: ${e.message}`);
           throw new Error(`Could not read "${filename}": ${e.message}`);
         }
-        diag(`upload part: filename="${filename}" type="${blob.type || '(none)'}" declaredSize=${blob.size} readBytes=${bytes.byteLength}`);
         fd.append('images', new Blob([bytes], { type: blob.type || 'application/octet-stream' }), filename);
       }
 
@@ -2252,14 +2247,13 @@
         xhr.open('POST', '/api/upload-images');
         xhr.withCredentials = true; // send auth cookies
         xhr.onload = () => {
-          diag(`upload response: ${xhr.status} ${(xhr.responseText || '').slice(0, 160)}`);
           if (xhr.status === 401) { window.location.href = '/welcome'; reject(new Error('Unauthorized')); return; }
           let d = {};
           try { d = JSON.parse(xhr.responseText); } catch (_) {}
           if (xhr.status >= 200 && xhr.status < 300 && !d.error) resolve(d);
           else reject(new Error(d.error || `upload failed (${xhr.status})`));
         };
-        xhr.onerror = () => { diag('upload: XHR network error'); reject(new Error('Network error during upload')); };
+        xhr.onerror = () => { reject(new Error('Network error during upload')); };
         xhr.send(fd);
       });
       return data.files; // [{ name, path, size }]
@@ -3268,17 +3262,10 @@
       if (!s || !s.terminal || !s.fitAddon) return;
       const shouldSnap = !s._userScrolledUp && !isAlternateScreenTerminal(s.terminal);
       s._suppressScrollTrack = true;
-      const _bc = s.terminal.cols, _br = s.terminal.rows;
       if (!safeFit(s)) {
         s._suppressScrollTrack = false;
         scheduleFitBackoffRetries(s);
         return;
-      }
-      // Log only when the grid actually changed — that's a real reflow. A no-op fit (size
-      // already correct, e.g. a clean reopen) stays silent, so the diag shows whether opening
-      // forced a reflow.
-      if (s.terminal.cols !== _bc || s.terminal.rows !== _br) {
-        diag(`reflow(fit) id=${s.id} ${_bc}x${_br}→${s.terminal.cols}x${s.terminal.rows}`);
       }
       clearFitBackoffTimers(s);
       if (shouldSnap) {
@@ -3317,7 +3304,6 @@
     // argument runs after the final fit() completes.
     function reflowTerminal(s, callback) {
       if (!s || !s.terminal || !s.fitAddon) return;
-      diag(`reflow(toggle) id=${s?.id}`);
       const shouldSnap = !s._userScrolledUp && !isAlternateScreenTerminal(s.terminal);
       s._suppressScrollTrack = true;
       const origSize = s.terminal.options.fontSize;
@@ -3526,8 +3512,6 @@
       let inertiaRAF = 0;
       let wheelTouchCx = 0;
       let wheelTouchCy = 0;
-      let _diagLogged = false;   // diag: log the gesture once
-      let _sgrSent = 0;          // diag: count SGR wheel events forwarded to PTY this gesture
       let wheelAccum = 0;        // accumulated finger px → drained into wheel notches (alt screen)
 
       container.addEventListener('touchstart', (e) => {
@@ -3541,8 +3525,6 @@
           lastTime = Date.now();
           velocityY = 0;
           scrolling = false;
-          _diagLogged = false;
-          _sgrSent = 0;
           wheelAccum = 0;
         }
       }, { passive: true });
@@ -3566,10 +3548,6 @@
         }
 
         if (scrolling) {
-          if (!_diagLogged) {
-            _diagLogged = true;
-            diag(`touchscroll: alt=${isAlternateScreenTerminal(term)} bufType=${(()=>{try{return term.buffer.active.type}catch(_){return '?'}})()}`);
-          }
           // Track velocity (exponential moving average for smoothness)
           const instantV = deltaFromLast / dt;
           velocityY = velocityY * 0.4 + instantV * 0.6;
@@ -3584,7 +3562,7 @@
             let notches = Math.trunc(Math.abs(wheelAccum) / notchPx);
             if (notches > 0) {
               const up = (wheelAccum > 0) !== altScrollInvert;
-              if (sendWheelNotches(term, container, up, notches, cx, cy)) _sgrSent += notches;
+              sendWheelNotches(term, container, up, notches, cx, cy);
               wheelAccum -= (wheelAccum > 0 ? 1 : -1) * notches * notchPx;
             }
             lastY = currentY;
@@ -3604,7 +3582,6 @@
       }, { passive: false });
 
       container.addEventListener('touchend', () => {
-        if (_diagLogged) diag(`touchscroll end: gesture=${scrolling} sgrSent=${_sgrSent}`);
         if (!scrolling) return;
         scrolling = false;
 
@@ -4272,21 +4249,12 @@
             s.terminal.write(writeData, () => {
               if (s.id === activeId) updateHistorySizeIndicator();
               try {
-                const t = s.terminal, b = t.buffer.active;
-                diag(`history rendered id=${id}: bufLines=${b.length} baseY=${b.baseY} viewportY=${b.viewportY} cursorY=${b.cursorY} rows=${t.rows} cols=${t.cols}`);
                 if (wasReconnecting) afterReconnectReplay(s); // fit + full refresh + snap
                 else snapToBottom(s);
                 // Alternate screen (tmux/vim/…): the scrollback wasn't cached, so the replayed
                 // history is only the pre-alt content. Nudge the PTY (SIGWINCH) so the app
                 // repaints its CURRENT screen — we rely entirely on the app's own redraw.
-                if (msg.altScreen) {
-                  diag(`altScreen reconnect id=${id} → SIGWINCH repaint`);
-                  forcePtyRepaint(s);
-                }
-                requestAnimationFrame(() => {
-                  const b2 = t.buffer.active;
-                  diag(`post-replay id=${id}: baseY=${b2.baseY} viewportY=${b2.viewportY} rows=${t.rows} cols=${t.cols}`);
-                });
+                if (msg.altScreen) forcePtyRepaint(s);
               } catch (_) {}
             });
           } else if (msg.type === 'exit') {
