@@ -1477,11 +1477,31 @@ app.post('/api/terminal/new', async (req, res) => {
     // tables (Cursor CLI, ratatui, blessed, etc.) treat East-Asian Ambiguous chars
     // (e.g., box-drawing │ ─ ┌ ┐) as 1 col — matching xterm.js's default rendering.
     // CJK locale would make them 2 cols, causing app layout to drift vs xterm grid.
+    // The hub is frequently launched from inside a Claude Code session, so
+    // process.env carries that launcher's session-identity markers
+    // (CLAUDECODE, CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_CHILD_SESSION, …).
+    // Forwarding them makes the Claude Code started in THIS terminal believe it
+    // is a nested CHILD of the launcher; in team/FleetView mode that suppresses
+    // transcript persistence — ~/.claude/projects/<id>.jsonl is never written and
+    // the whole session is lost on exit (verified: stripping these vars restores
+    // it). Give each terminal a clean, console-like env. Feature flags
+    // (CLAUDE_CODE_EXPERIMENTAL_*, re-applied from settings.json anyway) and
+    // CLAUDE_CONFIG_DIR are preserved; LANG/LC_ALL forced as below.
+    const ptyEnv = { ...process.env };
+    for (const key of Object.keys(ptyEnv)) {
+      if (key === 'CLAUDECODE' || key === 'AI_AGENT' || key === 'CLAUDE_EFFORT'
+          || (key.startsWith('CLAUDE_CODE_') && !key.startsWith('CLAUDE_CODE_EXPERIMENTAL_'))) {
+        delete ptyEnv[key];
+      }
+    }
+    ptyEnv.LANG = 'en_US.UTF-8';
+    ptyEnv.LC_ALL = 'en_US.UTF-8';
+
     const ptyProc = pty.spawn(shellCmd, shellArgs, {
       name: 'xterm-256color',
       cols, rows,
       cwd,
-      env: { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' }
+      env: ptyEnv
     });
 
     const lineBuf = createLineBuffer(MAX_BUFFER_BYTES);
