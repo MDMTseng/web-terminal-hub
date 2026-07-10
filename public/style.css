@@ -135,6 +135,7 @@ html, body {
   background: var(--bg-base);
   color: #e0e0e0;
   touch-action: manipulation;
+  overscroll-behavior: none;
 }
 
 #app {
@@ -421,6 +422,11 @@ html, body {
   gap: 3px;
   padding: 4px 2px;
   user-select: none;
+  /* Kill browser touch pan on the keypad. With the soft keyboard up, Safari otherwise
+     interprets a finger-drag on this area as page-scroll and slides #app around. Buttons
+     still receive taps and our special-keys popover drives its own pointer events. */
+  touch-action: none;
+  overscroll-behavior: contain;
 }
 
 /* Compact bar — always visible, single row */
@@ -596,6 +602,48 @@ html, body {
   transform: scale(0.95);
 }
 
+/* Special-keys popover (hold-and-slide gesture) */
+.vk-special-popover {
+  position: fixed;
+  z-index: 20000;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px;
+  background: rgba(31, 41, 55, 0.98);
+  border: 1px solid var(--border-mid);
+  border-radius: 12px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
+  max-width: 88vw;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.vk-special-popover.hidden {
+  display: none;
+}
+.vk-special-item {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-code);
+  background: var(--border-subtle);
+  border: 1px solid var(--border-mid);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: monospace;
+}
+.vk-special-item.vk-special-hot {
+  background: var(--accent, #3b82f6);
+  color: white;
+  transform: scale(1.15);
+  transition: transform 0.06s ease-out;
+}
+
 /* Modifier keys */
 .vk-modifiers {
   margin-bottom: 1px;
@@ -719,6 +767,11 @@ html, body {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  /* Same anti-slide guard as #vkeyboard: block vertical touch pan so a drag on the
+     footer doesn't shift #app while the soft keyboard is up. `pan-x` still allows
+     horizontal scroll when the row overflows. */
+  touch-action: pan-x;
+  overscroll-behavior: contain;
 }
 
 #statusbar::-webkit-scrollbar {

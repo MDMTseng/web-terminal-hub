@@ -54,6 +54,7 @@
         <button class="vk-key vk-action" data-key="ArrowRight">▶</button>
         <button class="vk-key vk-danger" data-combo="ctrl+c">^C</button>
         <button class="vk-key vk-action" data-key="Escape">Esc</button>
+        <button class="vk-key vk-special-btn" id="vk-special-btn" title="Special keys — hold, slide to key, release">·,</button>
         <button class="vk-key vk-scroll-btn" id="vk-scroll-btn" title="Scroll to bottom">⤓</button>
         <button class="vk-key vk-voice-btn" id="vk-voice-btn" title="Text input">✏️</button>
         <button class="vk-key vk-expand-btn" id="vk-expand-btn"><span id="vk-mode-label">Claude</span> ▾</button>
@@ -153,6 +154,23 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Special-keys popover: hold #vk-special-btn to open, slide finger to a key, release to send.
+         Fixes Chinese IME dead space / comma on iOS by bypassing the soft keyboard entirely. -->
+    <div id="vk-special-popover" class="vk-special-popover hidden" aria-hidden="true">
+      <button class="vk-special-item" data-char=" "  title="Space">␣</button>
+      <button class="vk-special-item" data-char=","  title="Comma">,</button>
+      <button class="vk-special-item" data-char="."  title="Period">.</button>
+      <button class="vk-special-item" data-char="/"  title="Slash">/</button>
+      <button class="vk-special-item" data-char="-"  title="Dash">-</button>
+      <button class="vk-special-item" data-char="_"  title="Underscore">_</button>
+      <button class="vk-special-item" data-char="="  title="Equals">=</button>
+      <button class="vk-special-item" data-char=":"  title="Colon">:</button>
+      <button class="vk-special-item" data-char=";"  title="Semicolon">;</button>
+      <button class="vk-special-item" data-char="'"  title="Single quote">'</button>
+      <button class="vk-special-item" data-char='"'  title="Double quote">"</button>
+      <button class="vk-special-item" data-char="\\" title="Backslash">\</button>
     </div>
 
     <!-- Status bar (footer): one row — group, font size, files, groups -->
@@ -1820,6 +1838,101 @@
       s.terminal.focus();
     }
 
+    /**
+     * Special-keys popover: hold the ·, button, slide finger to a key, release to send.
+     * Purpose: iOS Chinese IME swallows space / comma / other punctuation, forcing an English
+     * keyboard swap for each one. This bypasses the soft keyboard by sending the char via WS.
+     */
+    (function initSpecialKeysPopover() {
+      const btn = document.getElementById('vk-special-btn');
+      const pop = document.getElementById('vk-special-popover');
+      if (!btn || !pop) return;
+      // When the soft keyboard is up, #app is translateY(-kbHeight)'d. Any transform on an
+      // ancestor turns `position: fixed` into "fixed relative to that ancestor", so our
+      // getBoundingClientRect-based coordinates drift by kbHeight. Reparent to <body> so the
+      // popover is always fixed against the real viewport.
+      if (pop.parentElement !== document.body) document.body.appendChild(pop);
+
+      let activePointerId = null;
+      let hotItem = null;
+
+      function positionPopover() {
+        const r = btn.getBoundingClientRect();
+        // Show first so we can measure, then position.
+        pop.style.left = '0px';
+        pop.style.top = '0px';
+        pop.classList.remove('hidden');
+        pop.setAttribute('aria-hidden', 'false');
+        const pw = pop.offsetWidth;
+        const ph = pop.offsetHeight;
+        // Center horizontally on the button; clamp to viewport.
+        let left = r.left + r.width / 2 - pw / 2;
+        left = Math.max(6, Math.min(left, window.innerWidth - pw - 6));
+        // Above the button by 10px.
+        let top = r.top - ph - 10;
+        // If it would go off the top, place below.
+        if (top < 6) top = r.bottom + 10;
+        pop.style.left = `${left}px`;
+        pop.style.top = `${top}px`;
+      }
+
+      function setHot(el) {
+        if (hotItem === el) return;
+        if (hotItem) hotItem.classList.remove('vk-special-hot');
+        hotItem = (el && el.classList?.contains('vk-special-item')) ? el : null;
+        if (hotItem) {
+          hotItem.classList.add('vk-special-hot');
+          haptic(4);
+        }
+      }
+
+      function itemAt(x, y) {
+        const el = document.elementFromPoint(x, y);
+        return el && el.classList?.contains('vk-special-item') ? el : null;
+      }
+
+      function close(sendChar) {
+        pop.classList.add('hidden');
+        pop.setAttribute('aria-hidden', 'true');
+        if (hotItem) hotItem.classList.remove('vk-special-hot');
+        hotItem = null;
+        activePointerId = null;
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onCancel);
+        if (sendChar != null) sendKey(sendChar);
+      }
+
+      function onMove(e) {
+        if (e.pointerId !== activePointerId) return;
+        setHot(itemAt(e.clientX, e.clientY));
+        e.preventDefault();
+      }
+      function onUp(e) {
+        if (e.pointerId !== activePointerId) return;
+        const target = hotItem || itemAt(e.clientX, e.clientY);
+        const ch = target?.dataset?.char ?? null;
+        close(ch);
+      }
+      function onCancel(e) {
+        if (e.pointerId !== activePointerId) return;
+        close(null);
+      }
+
+      btn.addEventListener('pointerdown', (e) => {
+        if (activePointerId != null) return;
+        activePointerId = e.pointerId;
+        haptic(10);
+        positionPopover();
+        document.addEventListener('pointermove', onMove, { passive: false });
+        document.addEventListener('pointerup', onUp);
+        document.addEventListener('pointercancel', onCancel);
+        e.preventDefault(); // avoid triggering the standard vk-key click path
+      });
+      // Suppress the click event synthesized after touch — pointerup already handled it.
+      btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); }, true);
+    })();
+
     function getEscapeSequence(key) {
       const map = {
         'ArrowUp': '\x1b[A',
@@ -1914,6 +2027,34 @@
     });
     // Prevent long-press context menu on virtual keyboard
     document.getElementById('vkeyboard').addEventListener('contextmenu', (e) => e.preventDefault());
+    // Belt-and-suspenders: CSS `touch-action: none` on #vkeyboard covers most browsers, but iOS
+    // Safari's fixed+transform combo (which we use during soft-keyboard translate) sometimes
+    // ignores it and lets a drag on the keypad slide #app around. Explicit preventDefault on
+    // touchmove kills the default behaviour outright. Ranges (sliders) need native drag to
+    // register value changes, so skip them.
+    document.getElementById('vkeyboard').addEventListener('touchmove', (e) => {
+      if (e.target.closest('input[type="range"]')) return;
+      e.preventDefault();
+    }, { passive: false });
+    // #statusbar: same anti-slide guard, but keep horizontal scroll working (the row can overflow).
+    // Kill Y-drag only — compare start touch to current and preventDefault when it's mostly vertical.
+    (function guardStatusbarDrag() {
+      const sb = document.getElementById('statusbar');
+      if (!sb) return;
+      let startX = 0, startY = 0;
+      sb.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+      }, { passive: true });
+      sb.addEventListener('touchmove', (e) => {
+        if (e.touches.length !== 1) return;
+        const dx = Math.abs(e.touches[0].clientX - startX);
+        const dy = Math.abs(e.touches[0].clientY - startY);
+        // Vertical-dominant drag → block. Horizontal → let native overflow-x scroll handle it.
+        if (dy > dx) e.preventDefault();
+      }, { passive: false });
+    })();
 
     function resetModifiers() {
       modifiers.ctrl = false;
@@ -2110,16 +2251,37 @@
     // ---- File attach state ----
     let pendingFiles = []; // { file }
 
+    // Persist textarea content so accidentally closing the modal (or the page) doesn't
+    // wipe a half-written message. Cleared only after a successful send.
+    const TEXT_INPUT_DRAFT_KEY = 'termhub_text_input_draft';
+    function saveTextInputDraft() {
+      try {
+        const v = document.getElementById('text-input-area').value || '';
+        if (v) localStorage.setItem(TEXT_INPUT_DRAFT_KEY, v);
+        else localStorage.removeItem(TEXT_INPUT_DRAFT_KEY);
+      } catch (_) {}
+    }
+    function clearTextInputDraft() {
+      try { localStorage.removeItem(TEXT_INPUT_DRAFT_KEY); } catch (_) {}
+    }
+    function loadTextInputDraft() {
+      try { return localStorage.getItem(TEXT_INPUT_DRAFT_KEY) || ''; } catch (_) { return ''; }
+    }
+
     function openTextInputModal() {
       const modal = document.getElementById('text-input-modal');
       const area = document.getElementById('text-input-area');
       openModal('text-input-modal');
-      area.value = '';
+      // Restore last unsent draft so a bumped close doesn't discard work.
+      area.value = loadTextInputDraft();
+      updateTextInputInfo();
       clearAllAttachments();
       setTimeout(() => area.focus(), 150);
     }
 
     function closeTextInputModal(skipRefocus) {
+      // Keep whatever's in the textarea — user may have hit Cancel by accident.
+      saveTextInputDraft();
       closeModal('text-input-modal');
       document.getElementById('text-input-area').blur();
       clearAllAttachments();
@@ -2369,6 +2531,8 @@
       const info = document.getElementById('text-input-info');
       const fileBtn = document.getElementById('text-input-file-btn');
       const len = area.value.length;
+      // Persist on every keystroke so an unexpected close doesn't lose the draft.
+      saveTextInputDraft();
 
       if (len === 0) {
         info.textContent = '';
@@ -2420,7 +2584,13 @@
       });
     }
 
+    // Re-entry guard so a double-tap on Send / Send+↵ doesn't queue two runs.
+    let _sendingTextInput = false;
     async function sendTextInput(withEnter) {
+      if (_sendingTextInput) {
+        showToast('Already sending…', 'info', 1000);
+        return;
+      }
       const area = document.getElementById('text-input-area');
       let text = area.value;
       const hasImages = pendingImages.length > 0;
@@ -2434,6 +2604,11 @@
         return;
       }
 
+      _sendingTextInput = true;
+      const sendBtn = document.getElementById('text-input-send');
+      const enterBtn = document.querySelector('.text-input-enter');
+      if (sendBtn) sendBtn.disabled = true;
+      if (enterBtn) enterBtn.disabled = true;
       try {
         // Upload images first if any
         let attachPaths = [];
@@ -2449,6 +2624,7 @@
 
         // Close modal
         area.value = '';
+        clearTextInputDraft();  // draft was successfully sent
         updateTextInputInfo();
         closeModal('text-input-modal');
         area.blur();
@@ -2458,41 +2634,53 @@
         // Each attachment path is sent separately with a delay so the
         // receiving process (e.g. Claude Code) can register each file.
         const ATTACH_DELAY = 500; // ms between each attachment path
+        // Extra guard: always give the receiving TUI a moment to fully ingest the last chunk
+        // before we press Enter. Attachments already have their own tail delay; add one for
+        // text-only sends too — this addresses the "Enter didn't register" reports.
+        const PRE_ENTER_DELAY = 300;
         setTimeout(async () => {
-          if (text) {
-            await sendChunked(s.ws, text);
-          }
-          if (attachPaths.length > 0) {
-            for (let i = 0; i < attachPaths.length; i++) {
-              if (i > 0 || text) {
-                // Add a space separator before this path
-                s.ws.send(JSON.stringify({ type: 'input', data: ' ' }));
-              }
-              await sendChunked(s.ws, attachPaths[i]);
-              // Wait between each attachment so the target can process it
-              if (i < attachPaths.length - 1) {
-                await new Promise(r => setTimeout(r, ATTACH_DELAY));
-              }
+          try {
+            if (text) {
+              await sendChunked(s.ws, text);
             }
-          }
-          if (withEnter) {
-            // Extra delay before Enter when attachments are present
             if (attachPaths.length > 0) {
-              await new Promise(r => setTimeout(r, ATTACH_DELAY));
+              for (let i = 0; i < attachPaths.length; i++) {
+                if (i > 0 || text) {
+                  // Add a space separator before this path
+                  s.ws.send(JSON.stringify({ type: 'input', data: ' ' }));
+                }
+                await sendChunked(s.ws, attachPaths[i]);
+                // Wait between each attachment so the target can process it
+                if (i < attachPaths.length - 1) {
+                  await new Promise(r => setTimeout(r, ATTACH_DELAY));
+                }
+              }
             }
-            s.ws.send(JSON.stringify({ type: 'input', data: '\r' }));
+            if (withEnter) {
+              // Always wait before Enter so the TUI has fully processed the payload;
+              // attachments get an extra beat on top.
+              await new Promise(r => setTimeout(r, attachPaths.length > 0 ? ATTACH_DELAY : PRE_ENTER_DELAY));
+              s.ws.send(JSON.stringify({ type: 'input', data: '\r' }));
+            }
+            showToast(attachPaths.length > 0
+              ? `Sent with ${attachPaths.length} attachment${attachPaths.length > 1 ? 's' : ''}`
+              : `Sent (${(text || '').length} chars)`, 'success');
+            setTimeout(() => {
+              if (activeId && sessions[activeId] && sessions[activeId].terminal) {
+                sessions[activeId].terminal.focus();
+              }
+            }, 100);
+          } finally {
+            _sendingTextInput = false;
+            if (sendBtn) sendBtn.disabled = false;
+            if (enterBtn) enterBtn.disabled = false;
           }
-          showToast(attachPaths.length > 0
-            ? `Sent with ${attachPaths.length} attachment${attachPaths.length > 1 ? 's' : ''}`
-            : `Sent (${(text || '').length} chars)`, 'success');
-          setTimeout(() => {
-            if (activeId && sessions[activeId] && sessions[activeId].terminal) {
-              sessions[activeId].terminal.focus();
-            }
-          }, 100);
         }, 200);
       } catch (err) {
         showToast('Upload error: ' + err.message, 'error');
+        _sendingTextInput = false;
+        if (sendBtn) sendBtn.disabled = false;
+        if (enterBtn) enterBtn.disabled = false;
       }
     }
 
