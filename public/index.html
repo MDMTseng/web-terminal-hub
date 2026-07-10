@@ -1168,11 +1168,27 @@
     }
 
     // Copy the current path box (a file path after tapping a file, else the current dir).
+    // NOTE: writeText() on iOS Safari will silently ADD a text/uri-list entry when the string
+    // looks like a URI (e.g. "C:\..." matches "scheme:opaque"). Paste targets that prefer uri-list
+    // then receive URL-encoded output ("c:%5CUsers%5C..."). Use ClipboardItem with only text/plain
+    // so no uri-list is written.
     async function copyFmPath() {
       const inp = document.getElementById('fm-path-input');
-      const text = (inp.value || '').trim();
-      if (!text) { showToast('No path to copy', 'error'); return; }
+      const raw = (inp.value || '').trim();
+      if (!raw) { showToast('No path to copy', 'error'); return; }
+      // Windows path (e.g. C:\Users\...) starts with "letter:" which the paste target's URL
+      // parser matches as a URI scheme, then percent-encodes the backslashes into %5C. Wrap in
+      // double quotes to break the URI shape — most Windows shells / Claude Code accept quoted
+      // paths verbatim. POSIX paths (/foo/bar) have no scheme risk, copy as-is.
+      const isWinPath = /^[A-Za-z]:[\\/]/.test(raw);
+      const text = isWinPath ? `"${raw}"` : raw;
       try {
+        if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+          const item = new ClipboardItem({ 'text/plain': new Blob([text], { type: 'text/plain' }) });
+          await navigator.clipboard.write([item]);
+          showToast('Path copied', 'info');
+          return;
+        }
         await navigator.clipboard.writeText(text);
         showToast('Path copied', 'info');
         return;
@@ -3975,6 +3991,13 @@
     // (and conflicts with iOS Safari's back-swipe). Left disabled.
 
     async function closeTerminal(id) {
+      // Confirm before killing a live terminal — prevents accidental taps on mobile.
+      // File viewers have no destructive state; skip the prompt for them.
+      const sess = sessions[id];
+      if (sess && sess.type !== 'file') {
+        const label = (sess.tab?.querySelector('.tab-label')?.textContent || `#${id}`).trim();
+        if (!confirm(`Close terminal ${label}? Running processes will be terminated.`)) return;
+      }
       haptic(20);
       showToast('Closing...', 'info', 1500);
       // Skip server DELETE for file viewer tabs
