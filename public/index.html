@@ -4422,7 +4422,11 @@
             if (!s._diagFirstOut) { s._diagFirstOut = true; diag(`WS first-output id=${id} bytes=${(msg.data || '').length}`); }
             throttledWrite(s, msg.data);
             // Track live output in client-side history so re-render on backfill stays consistent.
-            if (typeof s._history === 'string') {
+            // Skip while on the alternate screen (Claude Code fullscreen / vim / tmux) — those
+            // programs repaint the whole viewport many times per second and would blow the 20MB
+            // cap in seconds. The server's line buffer already skips alt-screen the same way;
+            // this keeps the client mirror in sync semantically.
+            if (typeof s._history === 'string' && !isAlternateScreenTerminal(s.terminal)) {
               s._history += msg.data;
               const CLIENT_HISTORY_CAP = 20 * 1024 * 1024;
               if (s._history.length > CLIENT_HISTORY_CAP) {
