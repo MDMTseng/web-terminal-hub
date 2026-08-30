@@ -103,6 +103,7 @@ powershell -ExecutionPolicy Bypass -File install_service.ps1 -Uninstall
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `HUB_PORT` | `9091` | Server listen port |
+| `HUB_HOST` | *(all interfaces)* | Bind address. Set `127.0.0.1` to accept local connections only (e.g. behind a reverse proxy or tunnel) |
 | `BASE_PATH` | *(empty)* | URL prefix for reverse proxy (e.g. `/webterm`) |
 | `PROXY_STRIPS_BASE_PATH` | `false` | Set `true` if your proxy strips the prefix before forwarding |
 

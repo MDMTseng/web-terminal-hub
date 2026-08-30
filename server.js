@@ -82,6 +82,10 @@ process.on('unhandledRejection', (reason, promise) => {
 
 const app = express();
 const PORT = process.env.HUB_PORT || 9091;
+// Bind address. Unset means Node's default (all interfaces, dual-stack).
+// Set HUB_HOST=127.0.0.1 to accept only local connections, e.g. when a reverse
+// proxy or tunnel fronts the hub.
+const HOST = process.env.HUB_HOST || undefined;
 
 // ========== Groups config ==========
 let groupsConfig = [];
@@ -1781,9 +1785,9 @@ function kickGroupClients(groupName, reason) {
   }
 }
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   log.info('server', `========================================`);
-  log.info('server', `Web Terminal Hub running on port ${PORT}`);
+  log.info('server', `Web Terminal Hub running on ${HOST || '*'}:${PORT}`);
   log.info('server', `Groups: ${groupsConfig.map(g => g.name).join(', ')}`);
   log.info('server', `Master password: ${authConfig.passwordHash ? 'ENABLED' : 'NOT SET (visit /login to set up)'}`);
   log.info('server', `Log file: ${path.join(LOG_DIR, getLogFileName())}`);
